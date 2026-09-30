@@ -1714,7 +1714,7 @@
           <input type="text" id="live-link-input" value="${link}" readonly onclick="this.select()">
           <div class="action-buttons" style="margin-top:10px;">
             <button class="btn-action btn-shuffle" style="font-size:16px;" onclick="liveCopyLink()">COPIAR LINK 📋</button>
-            <button class="btn-action btn-shuffle" style="font-size:16px;" onclick="liveToggleOpen()">${liveMeta.open ? 'FECHAR INSCRIÇÕES' : 'REABRIR INSCRIÇÕES'}</button>
+            <button class="btn-action btn-shuffle" style="font-size:16px;" onclick="liveToggleOpen()">${liveMeta.open ? 'FECHAR INSCRIÇÕES (COMPLETA COM BOTS)' : 'REABRIR INSCRIÇÕES'}</button>
           </div>
           <div style="font-size:26px; color:#ffea00; margin:14px 0 8px;">
             INSCRITOS: ${list.length} / ${liveMeta.slots} ${full ? '✅' : ''}
@@ -1723,14 +1723,14 @@
             ${list.map((e, i) => `
               <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #000; border-radius:10px; padding:6px 10px; margin-bottom:6px; background:#1a0b34;">
                 <span>${i + 1}. ${(e.players || []).join(' & ')}</span>
-                <button class="check-btn" onclick="liveRemoveEntry('${e.key}')" style="cursor:pointer;">✖ REMOVER</button>
+                <button onclick="liveRemoveEntry('${e.key}')" style="cursor:pointer; font-family:inherit; font-size:14px; color:#fff; background:#c0392b; border:2px solid #000; border-radius:8px; padding:6px 12px;">✖ REMOVER</button>
               </div>`).join('') || '<div style="color:#aaa;">Aguardando inscrições...</div>'}
           </div>
           <div class="action-buttons" style="margin-top:14px;">
             <button class="btn-action btn-generate" ${full ? '' : 'disabled style="opacity:0.4; cursor:not-allowed;"'} onclick="liveGenerate()">GERAR CAMPEONATO COM OS INSCRITOS ⚔️</button>
           </div>
           <div style="text-align:center; margin-top:10px;">
-            <button class="check-btn" onclick="liveCloseRoom()" style="cursor:pointer;">ENCERRAR SALA</button>
+            <button onclick="liveCloseRoom()" style="cursor:pointer; font-family:inherit; font-size:14px; color:#fff; background:#555; border:2px solid #000; border-radius:8px; padding:6px 14px;">ENCERRAR SALA</button>
           </div>
         </div>`;
     }
@@ -1743,7 +1743,34 @@
 
     function liveToggleOpen() {
       if (!liveRoomCode || !liveMeta) return;
-      liveGetDb().ref('salas/' + liveRoomCode + '/open').set(!liveMeta.open);
+      const ref = liveGetDb().ref('salas/' + liveRoomCode);
+      if (!liveMeta.open) {
+        ref.child('open').set(true);
+        return;
+      }
+      // fechando: completa as vagas que faltam com Bot1, Bot2, ...
+      ref.transaction(room => {
+        if (!room) return room;
+        room.entries = room.entries || {};
+        let botNum = 0;
+        Object.keys(room.entries).forEach(k => {
+          (room.entries[k].players || []).forEach(n => {
+            const m = /^Bot(\d+)$/.exec(String(n));
+            if (m) botNum = Math.max(botNum, parseInt(m[1], 10));
+          });
+        });
+        let count = Object.keys(room.entries).length;
+        let t = Date.now();
+        while (count < room.slots) {
+          const players = [];
+          for (let i = 0; i < room.teamSize; i++) { botNum++; players.push('Bot' + botNum); }
+          room.entries[ref.child('entries').push().key] = { players: players, ts: ++t };
+          count++;
+        }
+        room.count = count;
+        room.open = false;
+        return room;
+      });
     }
 
     function liveRemoveEntry(key) {
