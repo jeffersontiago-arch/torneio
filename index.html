@@ -712,7 +712,7 @@
       </div>
 
       <div class="main-title-box">
-        <h1 id="title-display">CAMPEONATO DE X1 DA TIA GAMER</h1>
+        <h1 id="title-display">CAMPEONATO DE X1 DO(A) FULANO</h1>
       </div>
 
       <div class="avatar-upload-container">
@@ -734,7 +734,7 @@
 
         <div class="form-group">
           <div class="section-title">NOME DO CAMPEONATO</div>
-          <input type="text" id="tournament-name-input" value="CAMPEONATO DE X1 DA TIA GAMER" oninput="updateTitle(this.value)">
+          <input type="text" id="tournament-name-input" value="CAMPEONATO DE X1 DO(A) FULANO" oninput="updateTitle(this.value)">
         </div>
 
         <div class="form-group">
@@ -1641,9 +1641,9 @@
     }
 
     function genRoomCode() {
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
       let c = '';
-      for (let i = 0; i < 5; i++) c += chars[Math.floor(Math.random() * chars.length)];
+      for (let i = 0; i < 10; i++) c += chars[Math.floor(Math.random() * chars.length)];
       return c;
     }
 
@@ -1691,7 +1691,7 @@
     }
 
     function liveViewerLink() {
-      return location.origin + location.pathname + '?sala=' + liveRoomCode;
+      return location.origin + location.pathname + '?cadastro=' + liveRoomCode;
     }
 
     function liveRenderHost() {
@@ -1709,7 +1709,7 @@
 
       box.innerHTML = `
         <div class="solo-match-card" style="margin-top:12px;">
-          <div class="solo-match-title">SALA ${liveRoomCode} — ${liveMeta.modeLabel}</div>
+          <div class="solo-match-title">INSCRIÇÕES ABERTAS — ${liveMeta.modeLabel}</div>
           <div style="margin-bottom:8px;">Link para seus inscritos:</div>
           <input type="text" id="live-link-input" value="${link}" readonly onclick="this.select()">
           <div class="action-buttons" style="margin-top:10px;">
@@ -1898,9 +1898,15 @@
     }
 
     function liveInit() {
-      const code = new URLSearchParams(location.search).get('sala');
-      if (code) {
-        liveViewerInit(code.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+      const params = new URLSearchParams(location.search);
+      const novo = params.get('cadastro');
+      const antigo = params.get('sala');
+      if (novo) {
+        liveViewerInit(novo.toLowerCase().replace(/[^a-z0-9]/g, ''));
+        return true;
+      }
+      if (antigo) {
+        liveViewerInit(antigo.toUpperCase().replace(/[^A-Z0-9]/g, ''));
         return true;
       }
       // host: reconecta na sala aberta antes de recarregar a página
