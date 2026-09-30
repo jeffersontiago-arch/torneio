@@ -817,6 +817,7 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script>
     const BRAWLER_EMOJIS = ['🤼', '🔫', '🌵', '🏴‍☠️', '🦅', '🗡️', '⚡', '💣', '🧟', '🥊', '🤖', '👑', '🔥', '🔮', '蜥', '⚔️'];
     let bracketSize = 8;
@@ -1606,7 +1607,6 @@
 
 
     /* ===================== MODO AO VIVO (CADASTRO DOS INSCRITOS) ===================== */
-    // >>> COLE AQUI as chaves do seu projeto Firebase (veja o passo a passo) <<<
     const FIREBASE_CONFIG = {
       apiKey: "AIzaSyAUXQGPHayX5pgND2e_CHrXzEJUYXKY8xo",
       authDomain: "torneio-18ec7.firebaseapp.com",
@@ -1620,6 +1620,14 @@
     let liveDb = null;
     let liveRoomCode = null;
     let liveMeta = null;
+    let liveViewerKey = null;
+    let liveViewerRoom = null;
+    let liveViewerState = '';
+    let liveViewerRejected = false;
+
+    const PALAVRAS_LIVE = ['sol', 'gato', 'bola', 'pato', 'lua', 'casa', 'bolo', 'flor', 'rato', 'mesa', 'urso', 'pipa', 'dado', 'sapo', 'vaca', 'leao', 'bala', 'pizza', 'nuvem', 'cacau'];
+    const PARTES_FEIAS = ['porra', 'caralho', 'merda', 'bosta', 'buceta', 'boceta', 'foder', 'fuder', 'fodase', 'viado', 'cuzao', 'punheta', 'xereca', 'xoxota', 'prostituta', 'nazista', 'hitler', 'fuck', 'shit', 'bitch', 'pussy', 'nigg', 'estupr', 'pedofil', 'vagabund', 'arrombad', 'piroca'];
+    const TOKENS_FEIOS = ['cu', 'puta', 'puto', 'pau', 'fdp', 'pqp', 'vsf', 'tnc', 'sexo', 'krl', 'crl', 'bct', 'nazi'];
 
     function liveConfigured() {
       return typeof firebase !== 'undefined' && FIREBASE_CONFIG.databaseURL && FIREBASE_CONFIG.databaseURL.indexOf('COLE_AQUI') === -1;
@@ -1640,6 +1648,20 @@
       return String(s || '').replace(/[<>"'&`\\\/]/g, '').replace(/\s+/g, ' ').trim().slice(0, 20);
     }
 
+    function normTxt(s) {
+      return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    }
+
+    // filtro simples de apelidos impróprios (a aprovação manual é a segunda barreira)
+    function nickImproprio(nome) {
+      const leet = { '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '@': 'a', '$': 's' };
+      const base = String(nome || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[01345@$]/g, c => leet[c]);
+      const flat = base.replace(/[^a-z]/g, '');
+      const tokens = base.split(/[^a-z]+/).filter(Boolean);
+      if (PARTES_FEIAS.some(p => flat.indexOf(p) !== -1)) return true;
+      return tokens.some(t => TOKENS_FEIOS.indexOf(t) !== -1);
+    }
+
     function genRoomCode() {
       const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
       let c = '';
@@ -1647,31 +1669,61 @@
       return c;
     }
 
+    function sorteiaPalavra(atual) {
+      let p = atual;
+      while (p === atual) p = PALAVRAS_LIVE[Math.floor(Math.random() * PALAVRAS_LIVE.length)];
+      return p;
+    }
+
     function liveEntriesList(meta) {
       return Object.keys((meta && meta.entries) || {}).map(k => ({ key: k, ...meta.entries[k] }))
         .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    }
+
+    /* ---------- LOGIN DO HOST (só você) ---------- */
+    function liveSignIn() {
+      const auth = firebase.auth();
+      if (auth.currentUser) return Promise.resolve(auth.currentUser);
+      return auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).then(r => r.user);
+    }
+
+    function liveErroMsg(err) {
+      const c = (err && err.code) || '';
+      if (c === 'auth/operation-not-allowed') return 'O login com Google ainda não foi ativado no Firebase (Authentication > Método de login > Google).';
+      if (c === 'auth/unauthorized-domain') return 'Este endereço não está autorizado no Firebase (Authentication > Configurações > Domínios autorizados).';
+      if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request') return 'O login foi cancelado.';
+      if (c === 'auth/popup-blocked') return 'O navegador bloqueou a janela de login. Permita pop-ups e tente de novo.';
+      if (/permission/i.test((err && err.message) || '')) return 'O banco recusou a ação. Confira se as novas regras do Firebase foram publicadas.';
+      return (err && err.message) || 'Erro desconhecido.';
     }
 
     /* ---------- LADO DO HOST (você) ---------- */
     function liveOpenRoom() {
       const db = liveGetDb();
       if (!db) {
-        alert('O cadastro ao vivo ainda não foi configurado. Cole as chaves do Firebase no início do bloco "MODO AO VIVO" do arquivo.');
+        alert('O cadastro ao vivo ainda não foi configurado.');
         return;
       }
       savePlayersFromInputs();
       const selected = document.querySelector('#mode-selector .btn-option.selected');
-      const code = genRoomCode();
-      db.ref('salas/' + code).set({
+      const dados = {
         mode: currentMode,
         modeLabel: selected ? selected.innerText : currentMode,
         slots: getCurrentParticipantCount(),
-        teamSize: getTeamSize(),
-        open: true,
-        count: 0
+        teamSize: getTeamSize()
+      };
+      const code = genRoomCode();
+      liveSignIn().then(user => {
+        return db.ref('salas/' + code).set({
+          ...dados,
+          open: true,
+          aprovacao: true,
+          senha: sorteiaPalavra(''),
+          hostUid: user.uid
+        });
       }).then(() => {
         liveAttachHost(code);
-      }).catch(err => alert('Não consegui abrir a sala: ' + err.message));
+      }).catch(err => alert('Não consegui abrir as inscrições: ' + liveErroMsg(err)));
     }
 
     function liveAttachHost(code) {
@@ -1685,6 +1737,8 @@
         if (!liveMeta) {
           liveRoomCode = null;
           try { localStorage.removeItem('liveHostRoom'); } catch (e) {}
+        } else {
+          liveAutoApprove();
         }
         liveRenderHost();
       });
@@ -1692,6 +1746,14 @@
 
     function liveViewerLink() {
       return location.origin + location.pathname + '?cadastro=' + liveRoomCode;
+    }
+
+    function liveRoomRef() {
+      return liveGetDb().ref('salas/' + liveRoomCode);
+    }
+
+    function liveApproved() {
+      return liveEntriesList(liveMeta).filter(e => e.status === 'aprovado');
     }
 
     function liveRenderHost() {
@@ -1703,34 +1765,61 @@
         return;
       }
       document.getElementById('btn-live-open').style.display = 'none';
-      const list = liveEntriesList(liveMeta);
-      const full = list.length >= liveMeta.slots;
+      const all = liveEntriesList(liveMeta);
+      const ok = all.filter(e => e.status === 'aprovado');
+      const pend = all.filter(e => e.status !== 'aprovado');
+      const full = ok.length >= liveMeta.slots;
       const link = liveViewerLink();
+      const aprov = liveMeta.aprovacao !== false;
+      const btnStyle = 'cursor:pointer; font-family:inherit; font-size:14px; color:#fff; border:2px solid #000; border-radius:8px; padding:6px 12px;';
 
       box.innerHTML = `
         <div class="solo-match-card" style="margin-top:12px;">
-          <div class="solo-match-title">INSCRIÇÕES ABERTAS — ${liveMeta.modeLabel}</div>
+          <div class="solo-match-title">INSCRIÇÕES ${liveMeta.open ? 'ABERTAS' : 'FECHADAS'} — ${liveMeta.modeLabel}</div>
+
           <div style="margin-bottom:8px;">Link para seus inscritos:</div>
           <input type="text" id="live-link-input" value="${link}" readonly onclick="this.select()">
-          <div class="action-buttons" style="margin-top:10px;">
-            <button class="btn-action btn-shuffle" style="font-size:16px;" onclick="liveCopyLink()">COPIAR LINK 📋</button>
-            <button class="btn-action btn-shuffle" style="font-size:16px;" onclick="liveToggleOpen()">${liveMeta.open ? 'FECHAR INSCRIÇÕES (COMPLETA COM BOTS)' : 'REABRIR INSCRIÇÕES'}</button>
+
+          <div style="margin:14px 0 4px;">Palavra da live (fale na live para quem está assistindo):</div>
+          <div style="font-size:44px; color:#38ef7d; letter-spacing:4px; text-transform:uppercase;">${liveMeta.senha || '-'}</div>
+
+          <div class="action-buttons" style="margin-top:10px; flex-wrap:wrap;">
+            <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveCopyLink()">COPIAR LINK 📋</button>
+            <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveTrocaPalavra()">TROCAR PALAVRA 🔄</button>
+            <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveToggleAprovacao()">APROVAÇÃO: ${aprov ? 'LIGADA ✅' : 'DESLIGADA'}</button>
+            <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveToggleOpen()">${liveMeta.open ? 'FECHAR INSCRIÇÕES (COMPLETA COM BOTS)' : 'REABRIR INSCRIÇÕES'}</button>
           </div>
+
           <div style="font-size:26px; color:#ffea00; margin:14px 0 8px;">
-            INSCRITOS: ${list.length} / ${liveMeta.slots} ${full ? '✅' : ''}
+            INSCRITOS: ${ok.length} / ${liveMeta.slots} ${full ? '✅' : ''}
           </div>
           <div>
-            ${list.map((e, i) => `
+            ${ok.map((e, i) => `
               <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #000; border-radius:10px; padding:6px 10px; margin-bottom:6px; background:#1a0b34;">
                 <span>${i + 1}. ${(e.players || []).join(' & ')}</span>
-                <button onclick="liveRemoveEntry('${e.key}')" style="cursor:pointer; font-family:inherit; font-size:14px; color:#fff; background:#c0392b; border:2px solid #000; border-radius:8px; padding:6px 12px;">✖ REMOVER</button>
-              </div>`).join('') || '<div style="color:#aaa;">Aguardando inscrições...</div>'}
+                <button onclick="liveRemoveEntry('${e.key}')" style="${btnStyle} background:#c0392b;">✖ REMOVER</button>
+              </div>`).join('') || '<div style="color:#aaa;">Nenhum aprovado ainda...</div>'}
           </div>
+
+          ${pend.length ? `
+          <div style="font-size:22px; color:#ff9f43; margin:16px 0 8px;">⏳ AGUARDANDO APROVAÇÃO: ${pend.length}</div>
+          <div>
+            ${pend.map(e => `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; border:2px solid #ff9f43; border-radius:10px; padding:6px 10px; margin-bottom:6px; background:#1a0b34;">
+                <span>${(e.players || []).join(' & ')}</span>
+                <span>
+                  <button onclick="liveApprove('${e.key}')" style="${btnStyle} background:#27ae60;">✔ APROVAR</button>
+                  <button onclick="liveRemoveEntry('${e.key}')" style="${btnStyle} background:#c0392b;">✖ RECUSAR</button>
+                </span>
+              </div>`).join('')}
+          </div>` : ''}
+
           <div class="action-buttons" style="margin-top:14px;">
             <button class="btn-action btn-generate" ${full ? '' : 'disabled style="opacity:0.4; cursor:not-allowed;"'} onclick="liveGenerate()">GERAR CAMPEONATO COM OS INSCRITOS ⚔️</button>
           </div>
           <div style="text-align:center; margin-top:10px;">
-            <button onclick="liveCloseRoom()" style="cursor:pointer; font-family:inherit; font-size:14px; color:#fff; background:#555; border:2px solid #000; border-radius:8px; padding:6px 14px;">ENCERRAR SALA</button>
+            <button onclick="liveCloseRoom()" style="${btnStyle} background:#555;">ENCERRAR SALA</button>
+            <div style="font-size:14px; color:#ffea00; margin-top:8px;">⚠ Quando a live acabar, clique em ENCERRAR SALA para apagar os apelidos das crianças do banco.</div>
           </div>
         </div>`;
     }
@@ -1741,54 +1830,84 @@
       try { navigator.clipboard.writeText(input.value); } catch (e) { document.execCommand('copy'); }
     }
 
-    function liveToggleOpen() {
-      if (!liveRoomCode || !liveMeta) return;
-      const ref = liveGetDb().ref('salas/' + liveRoomCode);
-      if (!liveMeta.open) {
-        ref.child('open').set(true);
+    function liveTrocaPalavra() {
+      liveRoomRef().child('senha').set(sorteiaPalavra(liveMeta.senha || ''));
+    }
+
+    function liveToggleAprovacao() {
+      liveRoomRef().child('aprovacao').set(liveMeta.aprovacao === false);
+    }
+
+    // aprova um apelido (respeitando vagas e nomes repetidos)
+    function liveApprove(key) {
+      const ok = liveApproved();
+      if (ok.length >= liveMeta.slots) { alert('As vagas já estão completas.'); return; }
+      const e = liveEntriesList(liveMeta).find(x => x.key === key);
+      if (!e) return;
+      const usados = ok.flatMap(x => (x.players || []).map(normTxt));
+      if ((e.players || []).some(n => usados.indexOf(normTxt(n)) !== -1)) {
+        alert('Esse apelido já está na lista. Recuse para a criança tentar outro.');
         return;
       }
-      // fechando: completa as vagas que faltam com Bot1, Bot2, ...
-      ref.transaction(room => {
-        if (!room) return room;
-        room.entries = room.entries || {};
-        let botNum = 0;
-        Object.keys(room.entries).forEach(k => {
-          (room.entries[k].players || []).forEach(n => {
-            const m = /^Bot(\d+)$/.exec(String(n));
-            if (m) botNum = Math.max(botNum, parseInt(m[1], 10));
-          });
-        });
-        let count = Object.keys(room.entries).length;
-        let t = Date.now();
-        while (count < room.slots) {
-          const players = [];
-          for (let i = 0; i < room.teamSize; i++) { botNum++; players.push('Bot' + botNum); }
-          room.entries[ref.child('entries').push().key] = { players: players, ts: ++t };
-          count++;
-        }
-        room.count = count;
-        room.open = false;
-        return room;
+      liveRoomRef().child('entries/' + key + '/status').set('aprovado');
+    }
+
+    // com a aprovação desligada, o seu painel aprova sozinho (enquanto estiver aberto)
+    function liveAutoApprove() {
+      if (!liveMeta || liveMeta.aprovacao !== false || !liveMeta.open) return;
+      const all = liveEntriesList(liveMeta);
+      const ok = all.filter(e => e.status === 'aprovado');
+      const pend = all.filter(e => e.status !== 'aprovado');
+      if (!pend.length) return;
+      let vagas = liveMeta.slots - ok.length;
+      const usados = new Set(ok.flatMap(x => (x.players || []).map(normTxt)));
+      const up = {};
+      pend.forEach(e => {
+        if (vagas <= 0) return;
+        const nomes = (e.players || []).map(normTxt);
+        if (nomes.some(n => usados.has(n))) { up['entries/' + e.key] = null; return; }
+        nomes.forEach(n => usados.add(n));
+        up['entries/' + e.key + '/status'] = 'aprovado';
+        vagas--;
       });
+      if (Object.keys(up).length) liveRoomRef().update(up);
     }
 
     function liveRemoveEntry(key) {
-      liveGetDb().ref('salas/' + liveRoomCode).transaction(room => {
-        if (!room || !room.entries || !room.entries[key]) return room;
-        delete room.entries[key];
-        room.count = Math.max(0, (room.count || 1) - 1);
-        return room;
-      });
+      liveRoomRef().child('entries/' + key).remove();
+    }
+
+    // fechando: completa as vagas que faltam com Bot1, Bot2, ...
+    function liveToggleOpen() {
+      if (!liveRoomCode || !liveMeta) return;
+      if (!liveMeta.open) {
+        liveRoomRef().child('open').set(true);
+        return;
+      }
+      const all = liveEntriesList(liveMeta);
+      const ok = all.filter(e => e.status === 'aprovado');
+      let botNum = 0;
+      all.forEach(e => (e.players || []).forEach(n => {
+        const m = /^Bot(\d+)$/.exec(String(n));
+        if (m) botNum = Math.max(botNum, parseInt(m[1], 10));
+      }));
+      const up = { open: false };
+      let t = Date.now();
+      for (let c = ok.length; c < liveMeta.slots; c++) {
+        const players = [];
+        for (let i = 0; i < liveMeta.teamSize; i++) { botNum++; players.push('Bot' + botNum); }
+        up['entries/' + liveRoomRef().child('entries').push().key] = { players: players, status: 'aprovado', ts: ++t };
+      }
+      liveRoomRef().update(up);
     }
 
     function liveCloseRoom() {
-      if (!confirm('Encerrar a sala? Os inscritos não conseguirão mais entrar.')) return;
-      liveGetDb().ref('salas/' + liveRoomCode).remove();
+      if (!confirm('Encerrar e apagar tudo? Os inscritos não conseguirão mais entrar e os apelidos serão apagados do banco.')) return;
+      liveRoomRef().remove();
     }
 
     function liveGenerate() {
-      const list = liveEntriesList(liveMeta).slice(0, liveMeta.slots);
+      const list = liveApproved().slice(0, liveMeta.slots);
       if (list.length < liveMeta.slots) return;
 
       // garante o mesmo modo/tamanho da sala
@@ -1812,7 +1931,7 @@
       });
       renderPlayerInputs();
       generateAndSwitch();
-      liveGetDb().ref('salas/' + liveRoomCode + '/open').set(false);
+      liveRoomRef().child('open').set(false);
     }
 
     /* ---------- LADO DO INSCRITO (quem entra pelo link) ---------- */
@@ -1821,98 +1940,125 @@
       page.style.display = 'block';
       document.querySelector('.container').style.display = 'none';
       const content = document.getElementById('viewer-content');
+      content.innerHTML = '<div id="viewer-top"></div><div id="viewer-list"></div>';
 
       const db = liveGetDb();
       if (!db) {
         content.innerHTML = '<div class="section-title">Cadastro indisponível no momento.</div>';
         return;
       }
-      let myKey = null;
-      try { myKey = localStorage.getItem('inscrito_' + code); } catch (e) {}
+      try { liveViewerKey = localStorage.getItem('inscrito_' + code); } catch (e) {}
+      const top = document.getElementById('viewer-top');
+      const listBox = document.getElementById('viewer-list');
 
       db.ref('salas/' + code).on('value', snap => {
         const room = snap.val();
+        liveViewerRoom = room;
         if (!room) {
-          content.innerHTML = '<div class="section-title">Esta sala não existe ou já foi encerrada.</div>';
+          top.innerHTML = '<div class="section-title">Esta página de inscrição não existe ou já foi encerrada.</div>';
+          listBox.innerHTML = '';
+          liveViewerState = 'fim';
           return;
         }
-        const list = liveEntriesList(room);
-        const isIn = myKey && list.some(e => e.key === myKey);
-        const full = list.length >= room.slots;
-        const names = list.map((e, i) => `<div style="padding:4px 0;">${i + 1}. ${(e.players || []).map(cleanName).join(' & ')}</div>`).join('');
+        const all = liveEntriesList(room);
+        const ok = all.filter(e => e.status === 'aprovado');
+        const full = ok.length >= room.slots;
+        const closed = !room.open || full;
+        const mine = liveViewerKey ? all.find(e => e.key === liveViewerKey) : null;
 
-        let formHtml = '';
-        if (isIn) {
-          formHtml = '<div class="section-title" style="color:#38ef7d;">✅ Você está inscrito! Fique de olho na live.</div>';
-        } else if (!room.open || full) {
-          formHtml = '<div class="section-title">Inscrições encerradas. As vagas acabaram! 🙌</div>';
-        } else {
-          for (let m = 0; m < room.teamSize; m++) {
-            formHtml += `<input type="text" id="viewer-in-${m}" maxlength="20" placeholder="${room.teamSize > 1 ? 'Nome do jogador ' + (m + 1) : 'Seu nome / nick'}" style="margin-bottom:10px; width:100%;">`;
-          }
-          formHtml += '<button class="btn-action btn-generate" style="width:100%;" onclick="liveViewerSubmit(\'' + code + '\')">ENTRAR NO CAMPEONATO ⚔️</button><div id="viewer-msg" style="margin-top:10px; color:#ff6b6b;"></div>';
+        if (liveViewerKey && !mine) {
+          // se a inscrição existia e sumiu, foi recusada
+          if (liveViewerState.indexOf('mine-') === 0) liveViewerRejected = true;
+          liveViewerKey = null;
+          try { localStorage.removeItem('inscrito_' + code); } catch (e) {}
         }
 
-        // preserva o que a pessoa está digitando enquanto a lista atualiza
-        const typed = [];
-        for (let m = 0; m < room.teamSize; m++) { const el = document.getElementById('viewer-in-' + m); typed.push(el ? el.value : ''); }
-        content.innerHTML = `
-          <div class="section-title">${room.modeLabel}</div>
-          <div style="font-size:26px; color:#ffea00; margin-bottom:14px;">VAGAS: ${list.length} / ${room.slots}</div>
-          ${formHtml}
-          <div class="section-title" style="margin-top:20px;">JÁ INSCRITOS</div>
+        let state;
+        if (mine) state = 'mine-' + mine.status + (closed ? '-closed' : '');
+        else state = (closed ? 'closed' : 'form') + (liveViewerRejected ? '-r' : '');
+
+        // só redesenha o topo quando o estado muda (para não atrapalhar quem está digitando)
+        if (state !== liveViewerState) {
+          liveViewerState = state;
+          let html = `<div class="section-title">${room.modeLabel}</div>`;
+          if (mine && mine.status === 'aprovado') {
+            html += '<div class="section-title" style="color:#38ef7d;">✅ Você está inscrito! Fique de olho na live.</div>';
+          } else if (mine) {
+            html += closed
+              ? '<div class="section-title">As vagas acabaram. Fique de olho na próxima! 🙌</div>'
+              : '<div class="section-title" style="color:#ff9f43;">⏳ Quase lá! Aguarde o(a) apresentador(a) aprovar seu apelido.</div>';
+          } else if (closed) {
+            html += '<div class="section-title">As inscrições acabaram! 🙌</div>';
+          } else {
+            if (liveViewerRejected) html += '<div style="color:#ff6b6b; margin-bottom:10px;">Seu apelido não foi aceito. Tente outro!</div>';
+            html += '<div style="margin-bottom:10px; color:#ffea00;">Use só o apelido do jogo, nunca seu nome de verdade.</div>';
+            for (let m = 0; m < room.teamSize; m++) {
+              html += `<input type="text" id="viewer-in-${m}" maxlength="20" placeholder="${room.teamSize > 1 ? 'Apelido do jogador ' + (m + 1) : 'Seu apelido'}" style="margin-bottom:10px; width:100%;">`;
+            }
+            html += '<input type="text" id="viewer-word" maxlength="20" placeholder="Palavra da live (escute na live!)" style="margin-bottom:10px; width:100%;">';
+            html += '<button class="btn-action btn-generate" style="width:100%;" onclick="liveViewerSubmit(\'' + code + '\')">ENTRAR NO CAMPEONATO ⚔️</button><div id="viewer-msg" style="margin-top:10px; color:#ff6b6b;"></div>';
+          }
+          top.innerHTML = html;
+        }
+
+        const names = ok.map((e, i) => `<div style="padding:4px 0;">${i + 1}. ${(e.players || []).map(cleanName).join(' & ')}</div>`).join('');
+        listBox.innerHTML = `
+          <div style="font-size:26px; color:#ffea00; margin:14px 0;">VAGAS: ${ok.length} / ${room.slots}</div>
+          <div class="section-title">JÁ INSCRITOS</div>
           <div>${names || '<span style="color:#aaa;">Ninguém ainda. Seja o primeiro!</span>'}</div>`;
-        for (let m = 0; m < room.teamSize; m++) { const el = document.getElementById('viewer-in-' + m); if (el && typed[m]) el.value = typed[m]; }
       });
     }
 
     function liveViewerSubmit(code) {
       const msg = document.getElementById('viewer-msg');
+      const room = liveViewerRoom;
+      if (!room) return;
       const db = liveGetDb();
-      const inputs = Array.from(document.querySelectorAll('[id^="viewer-in-"]'));
-      const players = inputs.map(i => cleanName(i.value));
-      if (players.some(p => !p)) { msg.innerText = 'Preencha todos os nomes.'; return; }
+      const players = Array.from(document.querySelectorAll('[id^="viewer-in-"]')).map(i => cleanName(i.value));
+      const palavra = document.getElementById('viewer-word').value;
 
-      const ref = db.ref('salas/' + code);
-      const newKey = ref.child('entries').push().key;
-      let reason = '';
+      if (players.some(p => !p)) { msg.innerText = 'Preencha o apelido.'; return; }
+      if (room.senha && normTxt(palavra) !== normTxt(room.senha)) { msg.innerText = 'Palavra da live errada. Escute a live com atenção! 👂'; return; }
+      if (players.some(nickImproprio)) { msg.innerText = 'Esse apelido não pode. Escolha outro!'; return; }
 
-      ref.transaction(room => {
-        reason = '';
-        if (room === null) return room;
-        if (!room.open) { reason = 'As inscrições foram encerradas.'; return; }
-        if ((room.count || 0) >= room.slots) { reason = 'As vagas acabaram.'; return; }
-        const taken = Object.keys(room.entries || {}).some(k =>
-          (room.entries[k].players || []).some(n => players.some(p => p.toLowerCase() === String(n).toLowerCase())));
-        if (taken) { reason = 'Esse nome já está inscrito.'; return; }
-        room.entries = room.entries || {};
-        room.entries[newKey] = { players: players, ts: Date.now() };
-        room.count = (room.count || 0) + 1;
-        return room;
-      }, (err, committed) => {
-        if (err) { msg.innerText = 'Erro ao se inscrever. Tente de novo.'; return; }
-        if (!committed) { msg.innerText = reason || 'Não foi possível se inscrever. Tente de novo.'; return; }
-        try { localStorage.setItem('inscrito_' + code, newKey); } catch (e) {}
-        location.reload();
-      }, false);
+      const all = liveEntriesList(room);
+      const usados = all.flatMap(e => (e.players || []).map(normTxt));
+      if (players.some(p => usados.indexOf(normTxt(p)) !== -1)) { msg.innerText = 'Esse apelido já está na lista. Escolha outro!'; return; }
+      if (all.length >= room.slots * 4) { msg.innerText = 'Muita gente tentando agora. Espere um pouquinho e tente de novo.'; return; }
+
+      const ref = db.ref('salas/' + code + '/entries').push();
+      liveViewerKey = ref.key;
+      liveViewerRejected = false;
+      try { localStorage.setItem('inscrito_' + code, ref.key); } catch (e) {}
+      ref.set({ players: players, status: 'pendente', ts: Date.now() }).catch(() => {
+        liveViewerKey = null;
+        try { localStorage.removeItem('inscrito_' + code); } catch (e) {}
+        liveViewerState = '';
+        const m2 = document.getElementById('viewer-msg');
+        if (m2) m2.innerText = 'As inscrições estão fechadas ou deu erro. Tente de novo.';
+      });
     }
 
     function liveInit() {
       const params = new URLSearchParams(location.search);
       const novo = params.get('cadastro');
-      const antigo = params.get('sala');
       if (novo) {
         liveViewerInit(novo.toLowerCase().replace(/[^a-z0-9]/g, ''));
-        return true;
-      }
-      if (antigo) {
-        liveViewerInit(antigo.toUpperCase().replace(/[^A-Z0-9]/g, ''));
         return true;
       }
       // host: reconecta na sala aberta antes de recarregar a página
       try {
         const saved = localStorage.getItem('liveHostRoom');
-        if (saved && liveGetDb()) liveAttachHost(saved);
+        const db = liveGetDb();
+        if (saved && db) {
+          firebase.auth().onAuthStateChanged(u => {
+            if (!u || liveRoomCode) return;
+            db.ref('salas/' + saved).once('value').then(s => {
+              const v = s.val();
+              if (v && v.hostUid === u.uid) liveAttachHost(saved);
+            }).catch(() => {});
+          });
+        }
       } catch (e) {}
       return false;
     }
