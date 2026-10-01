@@ -1757,6 +1757,13 @@
       return liveEntriesList(liveMeta).filter(e => e.status === 'aprovado');
     }
 
+    // apelido no jogo + nome na live (só o host vê o nome da live)
+    function liveNomeEntry(e) {
+      const nick = (e.players || []).map(cleanName).join(' & ');
+      const live = e.live ? ` <span style="color:#00fbff; font-size:15px;">(na live: ${cleanName(e.live)})</span>` : '';
+      return nick + live;
+    }
+
     function liveRenderHost() {
       const box = document.getElementById('live-status');
       if (!box) return;
@@ -1802,7 +1809,7 @@
           <div>
             ${ok.map((e, i) => `
               <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #000; border-radius:10px; padding:6px 10px; margin-bottom:6px; background:#1a0b34;">
-                <span>${i + 1}. ${(e.players || []).join(' & ')}</span>
+                <span>${i + 1}. ${liveNomeEntry(e)}</span>
                 <button onclick="liveRemoveEntry('${e.key}')" style="${btnStyle} background:#c0392b;">✖ REMOVER</button>
               </div>`).join('') || '<div style="color:#aaa;">Nenhum aprovado ainda...</div>'}
           </div>
@@ -1812,7 +1819,7 @@
           <div>
             ${pend.map(e => `
               <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; border:2px solid #ff9f43; border-radius:10px; padding:6px 10px; margin-bottom:6px; background:#1a0b34;">
-                <span>${(e.players || []).join(' & ')}</span>
+                <span>${liveNomeEntry(e)}</span>
                 <span>
                   <button onclick="liveApprove('${e.key}')" style="${btnStyle} background:#27ae60;">✔ APROVAR</button>
                   <button onclick="liveRemoveEntry('${e.key}')" style="${btnStyle} background:#c0392b;">✖ RECUSAR</button>
@@ -2037,12 +2044,17 @@
             html += '<div class="section-title">As inscrições acabaram! 🙌</div>';
           } else {
             if (liveViewerRejected) html += '<div style="color:#ff6b6b; margin-bottom:10px;">Seu apelido não foi aceito. Tente outro!</div>';
-            html += '<div style="margin-bottom:10px; color:#ffea00;">Use só o apelido do jogo, nunca seu nome de verdade.</div>';
+            html += '<div style="margin-bottom:10px; color:#ffea00;">Use só apelidos, nunca seu nome completo nem sobrenome.</div>';
+            html += '<div style="margin:6px 0;">Seu nome na live (o nome que aparece no chat):<span style="color:#ff6b6b;"> *</span></div>';
+            html += '<input type="text" id="viewer-live" maxlength="20" placeholder="Nome no chat da live" oninput="liveViewerCheck()" style="margin-bottom:10px; width:100%;">';
+            html += `<div style="margin:6px 0;">${room.teamSize > 1 ? 'Apelidos no jogo:' : 'Seu apelido no jogo:'}<span style="color:#ff6b6b;"> *</span></div>`;
             for (let m = 0; m < room.teamSize; m++) {
-              html += `<input type="text" id="viewer-in-${m}" maxlength="20" placeholder="${room.teamSize > 1 ? 'Apelido do jogador ' + (m + 1) : 'Seu apelido'}" style="margin-bottom:10px; width:100%;">`;
+              html += `<input type="text" id="viewer-in-${m}" maxlength="20" placeholder="${room.teamSize > 1 ? 'Apelido do jogador ' + (m + 1) : 'Apelido no jogo'}" oninput="liveViewerCheck()" style="margin-bottom:10px; width:100%;">`;
             }
-            html += '<input type="text" id="viewer-word" maxlength="20" placeholder="Palavra da live (escute na live!)" style="margin-bottom:10px; width:100%;">';
-            html += '<button class="btn-action btn-generate" style="width:100%;" onclick="liveViewerSubmit(\'' + code + '\')">ENTRAR NO CAMPEONATO ⚔️</button><div id="viewer-msg" style="margin-top:10px; color:#ff6b6b;"></div>';
+            html += '<div style="margin:6px 0;">Palavra da live (escute na live!):<span style="color:#ff6b6b;"> *</span></div>';
+            html += '<input type="text" id="viewer-word" maxlength="20" placeholder="Palavra da live" oninput="liveViewerCheck()" style="margin-bottom:10px; width:100%;">';
+            html += '<div style="margin-bottom:8px; font-size:14px; color:#aaa;"><span style="color:#ff6b6b;">*</span> campo obrigatório</div>';
+            html += '<button id="viewer-btn" class="btn-action btn-generate" disabled style="width:100%; opacity:0.45; cursor:not-allowed;" onclick="liveViewerSubmit(\'' + code + '\')">ENTRAR NO CAMPEONATO ⚔️</button><div id="viewer-msg" style="margin-top:10px; color:#ff6b6b;"></div>';
           }
           top.innerHTML = html;
         }
@@ -2055,6 +2067,22 @@
       });
     }
 
+    // libera o botão só quando todos os campos obrigatórios estão preenchidos
+    function liveViewerCampos() {
+      return Array.from(document.querySelectorAll('[id^="viewer-in-"], #viewer-live, #viewer-word'));
+    }
+
+    function liveViewerCheck() {
+      const campos = liveViewerCampos();
+      const btn = document.getElementById('viewer-btn');
+      campos.forEach(c => { if (c.value.trim()) c.style.borderColor = ''; });
+      if (!btn) return;
+      const ok = campos.length > 0 && campos.every(c => c.value.trim());
+      btn.disabled = !ok;
+      btn.style.opacity = ok ? '1' : '0.45';
+      btn.style.cursor = ok ? 'pointer' : 'not-allowed';
+    }
+
     function liveViewerSubmit(code) {
       const msg = document.getElementById('viewer-msg');
       const room = liveViewerRoom;
@@ -2062,10 +2090,21 @@
       const db = liveGetDb();
       const players = Array.from(document.querySelectorAll('[id^="viewer-in-"]')).map(i => cleanName(i.value));
       const palavra = document.getElementById('viewer-word').value;
+      const live = cleanName(document.getElementById('viewer-live').value);
 
-      if (players.some(p => !p)) { msg.innerText = 'Preencha o apelido.'; return; }
+      // nenhum campo obrigatório pode ficar vazio
+      let vazio = null;
+      liveViewerCampos().forEach(c => {
+        const preenchido = c.value.trim() !== '';
+        c.style.borderColor = preenchido ? '' : '#ff6b6b';
+        if (!preenchido && !vazio) vazio = c;
+      });
+      if (vazio) { msg.innerText = 'Preencha todos os campos marcados com *.'; vazio.focus(); return; }
+
+      if (!live) { msg.innerText = 'Escreva seu nome na live (o do chat).'; return; }
+      if (players.some(p => !p)) { msg.innerText = 'Preencha o apelido do jogo.'; return; }
       if (room.senha && normTxt(palavra) !== normTxt(room.senha)) { msg.innerText = 'Palavra da live errada. Escute a live com atenção! 👂'; return; }
-      if (players.some(nickImproprio)) { msg.innerText = 'Esse apelido não pode. Escolha outro!'; return; }
+      if (nickImproprio(live) || players.some(nickImproprio)) { msg.innerText = 'Esse apelido não pode. Escolha outro!'; return; }
 
       const all = liveEntriesList(room);
       const usados = all.flatMap(e => (e.players || []).map(normTxt));
@@ -2076,7 +2115,7 @@
       liveViewerKey = ref.key;
       liveViewerRejected = false;
       try { localStorage.setItem('inscrito_' + code, ref.key); } catch (e) {}
-      ref.set({ players: players, status: 'pendente', ts: Date.now() }).catch(() => {
+      ref.set({ players: players, live: live, status: 'pendente', ts: Date.now() }).catch(() => {
         liveViewerKey = null;
         try { localStorage.removeItem('inscrito_' + code); } catch (e) {}
         liveViewerState = '';
