@@ -870,6 +870,7 @@
     }
 
     function selectMode(mode, element) {
+      if (mode !== currentMode) liveResetRoom();
       savePlayersFromInputs();
       currentMode = mode;
       document.querySelectorAll('#mode-selector .btn-option').forEach(el => el.classList.remove('selected'));
@@ -894,11 +895,13 @@
       let num = parseInt(val) || 2;
       if (num < 2) num = 2;
       if (num > 100) num = 100;
+      if (num !== customPlayerCount) liveResetRoom();
       customPlayerCount = num;
       renderPlayerInputs();
     }
 
     function setBracketSize(size, element) {
+      if (size !== bracketSize) liveResetRoom();
       savePlayersFromInputs();
       bracketSize = size;
       document.querySelectorAll('#size-selector .btn-option').forEach(btn => btn.classList.remove('selected'));
@@ -1956,12 +1959,36 @@
       liveRoomRef().update(up);
     }
 
+    // ao mudar o formato, a sala some e volta o botão de abrir inscrições (como ENCERRAR SALA)
+    let liveSuppressReset = false;
+
+    function liveResetRoom() {
+      if (liveSuppressReset || !liveRoomCode) return;
+      const code = liveRoomCode;
+      const db = liveGetDb();
+      liveRoomCode = null;
+      liveMeta = null;
+      try { localStorage.removeItem('liveHostRoom'); } catch (e) {}
+      const ov = document.getElementById('live-qr-overlay');
+      if (ov) ov.remove();
+      if (db) {
+        db.ref('salas/' + code).off();
+        db.ref('salas/' + code).remove().catch(() => {});
+      }
+      liveRenderHost();
+    }
+
     function liveCloseRoom() {
       if (!confirm('Encerrar e apagar tudo? Os inscritos não conseguirão mais entrar e os apelidos serão apagados do banco.')) return;
       liveRoomRef().remove();
     }
 
     function liveGenerate() {
+      liveSuppressReset = true;
+      try { liveGenerateInner(); } finally { liveSuppressReset = false; }
+    }
+
+    function liveGenerateInner() {
       const list = liveApproved().slice(0, liveMeta.slots);
       if (list.length < liveMeta.slots) return;
 
