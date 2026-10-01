@@ -818,6 +818,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script>
     const BRAWLER_EMOJIS = ['🤼', '🔫', '🌵', '🏴‍☠️', '🦅', '🗡️', '⚡', '💣', '🧟', '🥊', '🤖', '👑', '🔥', '🔮', '蜥', '⚔️'];
     let bracketSize = 8;
@@ -1780,6 +1781,11 @@
           <div style="margin-bottom:8px;">Link para seus inscritos:</div>
           <input type="text" id="live-link-input" value="${link}" readonly onclick="this.select()">
 
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:10px;">
+            <div id="live-qr" style="background:#fff; padding:10px; border-radius:12px; line-height:0;"></div>
+            <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveQrGrande()">MOSTRAR QR GRANDE 🔍</button>
+          </div>
+
           <div style="margin:14px 0 4px;">Palavra da live (fale na live para quem está assistindo):</div>
           <div style="font-size:44px; color:#38ef7d; letter-spacing:4px; text-transform:uppercase;">${liveMeta.senha || '-'}</div>
 
@@ -1822,6 +1828,46 @@
             <div style="font-size:14px; color:#ffea00; margin-top:8px;">⚠ Quando a live acabar, clique em ENCERRAR SALA para apagar os apelidos das crianças do banco.</div>
           </div>
         </div>`;
+      liveDrawQr(link);
+    }
+
+    /* ---------- QR CODE DO LINK ---------- */
+    let liveQrEl = null;
+    let liveQrLink = '';
+
+    function liveMakeQr(text, size) {
+      const d = document.createElement('div');
+      if (typeof QRCode === 'undefined') { d.innerText = 'QR indisponível (sem internet?)'; d.style.color = '#000'; return d; }
+      new QRCode(d, { text: text, width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
+      return d;
+    }
+
+    function liveDrawQr(link) {
+      const slot = document.getElementById('live-qr');
+      if (!slot) return;
+      if (!liveQrEl || liveQrLink !== link) { liveQrEl = liveMakeQr(link, 180); liveQrLink = link; }
+      slot.appendChild(liveQrEl);
+    }
+
+    function liveQrGrande() {
+      if (!liveRoomCode) return;
+      const old = document.getElementById('live-qr-overlay');
+      if (old) old.remove();
+      const size = Math.min(520, Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.6));
+      const ov = document.createElement('div');
+      ov.id = 'live-qr-overlay';
+      ov.style.cssText = 'position:fixed; inset:0; background:rgba(12,3,29,0.96); z-index:10000; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; cursor:pointer;';
+      ov.onclick = () => ov.remove();
+      ov.innerHTML = '<div style="font-size:32px; color:#ffea00; margin-bottom:16px;">📱 APONTE A CÂMERA DO CELULAR PARA SE INSCREVER!</div>';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#fff; padding:16px; border-radius:16px;';
+      box.appendChild(liveMakeQr(liveViewerLink(), size));
+      ov.appendChild(box);
+      const dica = document.createElement('div');
+      dica.style.cssText = 'margin-top:16px; color:#aaa; font-size:16px;';
+      dica.innerText = 'Clique em qualquer lugar para fechar';
+      ov.appendChild(dica);
+      document.body.appendChild(ov);
     }
 
     function liveCopyLink() {
