@@ -694,6 +694,15 @@
 
   <canvas id="confetti-canvas"></canvas>
 
+  <div id="login-gate" style="position:fixed; inset:0; z-index:20000; display:flex; align-items:center; justify-content:center; padding:20px; background:radial-gradient(circle at 50% 30%, #3e1980 0%, #170733 70%, #0c031d 100%);">
+    <div class="config-card" style="max-width:480px; width:100%; text-align:center;">
+      <div class="section-title" style="font-size:28px;">🔒 ÁREA DO ORGANIZADOR</div>
+      <div id="gate-msg" style="margin:14px 0 18px;">Carregando...</div>
+      <button id="gate-btn" class="btn-action btn-generate" style="width:100%; display:none;" onclick="liveGateLogin()">ENTRAR COM GOOGLE</button>
+      <button id="gate-out" class="btn-action btn-shuffle" style="width:100%; display:none; margin-top:10px;" onclick="liveGateLogout()">SAIR E TROCAR DE CONTA</button>
+    </div>
+  </div>
+
   <div id="viewer-page" style="display:none; width:100%; max-width:600px; margin:0 auto;">
     <div class="header-banner" style="margin-bottom:20px;">
       <div class="main-title-box"><h1>INSCRIÇÃO NO CAMPEONATO</h1></div>
@@ -2160,27 +2169,74 @@
       });
     }
 
+    /* ---------- LOGIN DO ORGANIZADOR (tela que bloqueia o painel) ---------- */
+    const EMAILS_AUTORIZADOS = ['jefferson.tiago@gmail.com'];
+
+    function liveGateLogin() {
+      liveGetDb();
+      const msg = document.getElementById('gate-msg');
+      firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
+        .catch(err => { msg.innerText = liveErroMsg(err); });
+    }
+
+    function liveGateLogout() {
+      firebase.auth().signOut();
+    }
+
+    function liveGateStart() {
+      const gate = document.getElementById('login-gate');
+      const msg = document.getElementById('gate-msg');
+      const btn = document.getElementById('gate-btn');
+      const out = document.getElementById('gate-out');
+      if (!liveGetDb() || !firebase.auth) {
+        msg.innerText = 'Não foi possível carregar o login. Verifique a internet e recarregue a página.';
+        return;
+      }
+      firebase.auth().onAuthStateChanged(u => {
+        if (!u) {
+          msg.innerText = 'Entre com sua conta Google para usar o painel.';
+          btn.style.display = 'block';
+          out.style.display = 'none';
+          gate.style.display = 'flex';
+          return;
+        }
+        const email = (u.email || '').toLowerCase();
+        const autorizado = u.emailVerified && EMAILS_AUTORIZADOS.map(e => e.toLowerCase()).indexOf(email) !== -1;
+        if (autorizado) {
+          gate.style.display = 'none';
+          liveReconnectHost(u);
+        } else {
+          msg.innerText = 'Acesso negado. A conta ' + email + ' não está autorizada.';
+          btn.style.display = 'none';
+          out.style.display = 'block';
+          gate.style.display = 'flex';
+        }
+      });
+    }
+
+    // host: reconecta na sala aberta antes de recarregar a página
+    function liveReconnectHost(u) {
+      try {
+        const saved = localStorage.getItem('liveHostRoom');
+        const db = liveGetDb();
+        if (!saved || !db || liveRoomCode) return;
+        db.ref('salas/' + saved).once('value').then(s => {
+          const v = s.val();
+          if (v && v.hostUid === u.uid && !liveRoomCode) liveAttachHost(saved);
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
     function liveInit() {
       const params = new URLSearchParams(location.search);
       const novo = params.get('cadastro');
       if (novo) {
+        // quem entra pelo link de inscrição não precisa de login
+        document.getElementById('login-gate').style.display = 'none';
         liveViewerInit(novo.toLowerCase().replace(/[^a-z0-9]/g, ''));
         return true;
       }
-      // host: reconecta na sala aberta antes de recarregar a página
-      try {
-        const saved = localStorage.getItem('liveHostRoom');
-        const db = liveGetDb();
-        if (saved && db) {
-          firebase.auth().onAuthStateChanged(u => {
-            if (!u || liveRoomCode) return;
-            db.ref('salas/' + saved).once('value').then(s => {
-              const v = s.val();
-              if (v && v.hostUid === u.uid) liveAttachHost(saved);
-            }).catch(() => {});
-          });
-        }
-      } catch (e) {}
+      liveGateStart();
       return false;
     }
     /* =================== FIM DO MODO AO VIVO =================== */
