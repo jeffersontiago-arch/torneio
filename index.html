@@ -792,6 +792,7 @@
 
         <div class="form-group" id="live-panel">
           <div class="section-title">📡 CADASTRO AO VIVO (SEUS INSCRITOS SE CADASTRAM PELO LINK)</div>
+          <div class="action-buttons" style="margin-bottom:10px;"><button class="btn-action btn-shuffle" style="font-size:15px;" onclick="cfgOpen()">⚙ CONFIGURAÇÕES</button><button class="btn-action btn-shuffle" style="font-size:15px;" onclick="rankOpen()">🏆 RANKING</button></div>
           <button class="btn-action btn-shuffle" id="btn-live-open" style="width:100%;" onclick="liveOpenRoom()">ABRIR INSCRIÇÕES AO VIVO 📡</button>
           <div id="live-status"></div>
         </div>
@@ -1737,6 +1738,13 @@
           hostUid: user.uid
         });
       }).then(() => {
+        const pf = (liveCfg && liveCfg.perfil) || {};
+        if (pf.auto && pf.nick) {
+          const players = [pf.nick];
+          for (let i = 2; i <= dados.teamSize; i++) players.push('Parceiro ' + i);
+          return db.ref('salas/' + code + '/entries').push().set({ players: players, live: pf.live || '', status: 'aprovado', ts: Date.now() });
+        }
+      }).then(() => {
         liveAttachHost(code);
       }).catch(err => alert('Não consegui abrir as inscrições: ' + liveErroMsg(err)));
     }
@@ -2170,7 +2178,7 @@
     }
 
     /* ---------- LOGIN DO ORGANIZADOR (tela que bloqueia o painel) ---------- */
-    const EMAILS_AUTORIZADOS = ['jefferson.tiago@gmail.com'];
+    const EMAILS_AUTORIZADOS = ['jefferson.tiago@gmail.com', 'tiagamerbrawlstars@gmail.com'];
 
     function liveGateLogin() {
       liveGetDb();
@@ -2205,6 +2213,7 @@
         if (autorizado) {
           gate.style.display = 'none';
           liveReconnectHost(u);
+          cfgLoad();
         } else {
           msg.innerText = 'Acesso negado. A conta ' + email + ' não está autorizada.';
           btn.style.display = 'none';
@@ -2222,7 +2231,7 @@
         if (!saved || !db || liveRoomCode) return;
         db.ref('salas/' + saved).once('value').then(s => {
           const v = s.val();
-          if (v && v.hostUid === u.uid && !liveRoomCode) liveAttachHost(saved);
+          if (v && !liveRoomCode) liveAttachHost(saved);
         }).catch(() => {});
       } catch (e) {}
     }
@@ -2239,6 +2248,110 @@
       liveGateStart();
       return false;
     }
+    /* ---------- CONFIG DO ORGANIZADOR, PRÊMIO E RANKING ---------- */
+    let liveCfg = {};
+    let liveUltimoCampeao = '';
+    const REDES = ['Instagram', 'TikTok', 'YouTube', 'Twitch', 'Discord'];
+    const esc = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    function cfgLoad() {
+      const db = liveGetDb();
+      if (db) db.ref('config').once('value').then(s => { liveCfg = s.val() || {}; }).catch(() => {});
+    }
+
+    function uiModal(html) {
+      const old = document.getElementById('ui-modal'); if (old) old.remove();
+      const m = document.createElement('div');
+      m.id = 'ui-modal';
+      m.style.cssText = 'position:fixed;inset:0;z-index:15000;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:16px;';
+      m.innerHTML = '<div class="config-card" style="max-width:600px;width:100%;max-height:92vh;overflow:auto;">' + html + '</div>';
+      document.body.appendChild(m);
+    }
+    function uiClose() { const m = document.getElementById('ui-modal'); if (m) m.remove(); }
+
+    function cfgOpen() {
+      const p = liveCfg.perfil || {}, pr = liveCfg.premio || {}, r = pr.redes || {};
+      uiModal(`<div class="section-title">⚙ CONFIGURAÇÕES DO ORGANIZADOR</div>
+        <div>Meu nome na live:</div><input type="text" id="cf-live" value="${esc(p.live)}" maxlength="20">
+        <div style="margin-top:8px;">Meu apelido no jogo:</div><input type="text" id="cf-nick" value="${esc(p.nick)}" maxlength="20">
+        <label style="display:block;margin:10px 0;"><input type="checkbox" id="cf-auto" ${p.auto ? 'checked' : ''}> Entrar já aprovado em toda sala nova (posso me remover)</label>
+        <div>Como receber o prêmio (aparece na tela do campeão):</div>
+        <textarea id="cf-texto" rows="3" maxlength="300" style="width:100%;border-radius:12px;padding:8px;">${esc(pr.texto)}</textarea>
+        ${REDES.map(n => `<div style="margin-top:6px;">${n} (link começando com https://):</div><input type="text" id="cf-r-${n}" value="${esc(r[n])}">`).join('')}
+        <div class="action-buttons" style="margin-top:14px;"><button class="btn-action btn-generate" onclick="cfgSave()">SALVAR</button><button class="btn-action btn-shuffle" onclick="uiClose()">FECHAR</button></div>`);
+    }
+
+    function cfgSave() {
+      const g = id => document.getElementById(id).value.trim();
+      const redes = {};
+      REDES.forEach(n => { const v = g('cf-r-' + n); if (/^https?:\/\//i.test(v)) redes[n] = v; });
+      liveCfg = { perfil: { live: cleanName(g('cf-live')), nick: cleanName(g('cf-nick')), auto: document.getElementById('cf-auto').checked },
+                  premio: { texto: g('cf-texto').slice(0, 300), redes: redes } };
+      liveGetDb().ref('config').set(liveCfg).then(uiClose).catch(e => alert(liveErroMsg(e)));
+    }
+
+    // tela do campeão: como receber o prêmio + redes + salvar no ranking
+    const _triggerVictoryOriginal = triggerVictoryScreen;
+    triggerVictoryScreen = function (nome) {
+      _triggerVictoryOriginal(nome);
+      try { liveAfterWin(nome); } catch (e) { console.error(e); }
+    };
+
+    function liveAfterWin(nome) {
+      liveUltimoCampeao = nome;
+      const card = document.querySelector('#tab-champion .champion-screen-card') || document.getElementById('tab-champion');
+      if (!card) return;
+      const old = document.getElementById('premio-box'); if (old) old.remove();
+      const pr = liveCfg.premio || {}, r = pr.redes || {};
+      const links = Object.keys(r).map(n => `<a href="${esc(r[n])}" target="_blank" rel="noopener" class="btn-action btn-shuffle" style="display:inline-block;text-decoration:none;margin:4px;font-size:15px;padding:8px 14px;">${n}</a>`).join('');
+      const box = document.createElement('div');
+      box.id = 'premio-box';
+      box.style.cssText = 'margin-top:18px;text-align:center;';
+      box.innerHTML = `<div class="section-title">🎁 COMO RECEBER O SEU PRÊMIO</div>
+        <div style="margin:6px 0 10px;">${esc(pr.texto) || 'Siga todas as nossas redes sociais e envie uma mensagem no privado para receber o seu prêmio!'}</div>${links}
+        <div style="margin-top:14px;"><input type="text" id="rank-premio" placeholder="Prêmio ganho (para o ranking)" maxlength="40" style="width:60%;">
+        <button class="btn-action btn-generate" style="font-size:15px;padding:8px 14px;" onclick="rankSave()">SALVAR NO RANKING 🏆</button></div>`;
+      card.appendChild(box);
+    }
+
+    function rankFormato() {
+      const sel = document.querySelector('#mode-selector .btn-option.selected');
+      return sel ? sel.innerText : currentMode;
+    }
+
+    function rankSave() {
+      const premio = (document.getElementById('rank-premio').value || '').trim().slice(0, 40);
+      liveGetDb().ref('ranking').push().set({ formato: rankFormato(), campeao: cleanName(liveUltimoCampeao), premio: premio, ts: Date.now() })
+        .then(() => { document.getElementById('rank-premio').value = ''; alert('Salvo no ranking!'); })
+        .catch(e => alert(liveErroMsg(e)));
+    }
+
+    function rankOpen() {
+      liveGetDb().ref('ranking').once('value').then(s => {
+        const v = s.val() || {};
+        const list = Object.keys(v).map(k => ({ key: k, ...v[k] })).sort((a, b) => b.ts - a.ts);
+        const formatos = Array.from(new Set(list.map(x => x.formato)));
+        let html = '<div class="section-title">🏆 RANKING DE CAMPEÕES (TODOS OS TEMPOS)</div>';
+        if (!list.length) html += '<div style="color:#aaa;">Nenhum campeão salvo ainda.</div>';
+        formatos.forEach(f => {
+          const dos = list.filter(x => x.formato === f), cont = {};
+          dos.forEach(x => { cont[x.campeao] = (cont[x.campeao] || 0) + 1; });
+          const top = Object.keys(cont).sort((a, b) => cont[b] - cont[a]);
+          html += `<div style="color:#00fbff;font-size:20px;margin-top:14px;">${esc(f)}</div>`
+            + top.map((n, i) => `<div>${i + 1}º ${esc(n)} — ${cont[n]} vitória(s)</div>`).join('')
+            + '<div style="color:#aaa;margin-top:6px;">Histórico:</div>'
+            + dos.map(x => `<div style="font-size:14px;display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #333;padding:3px 0;"><span>${new Date(x.ts).toLocaleDateString('pt-BR')} — ${esc(x.campeao)} — prêmio: ${esc(x.premio) || '-'}</span><button onclick="rankDel('${x.key}')" style="cursor:pointer;background:#c0392b;color:#fff;border:0;border-radius:6px;">✖</button></div>`).join('');
+        });
+        html += '<div class="action-buttons" style="margin-top:14px;"><button class="btn-action btn-shuffle" onclick="uiClose()">FECHAR</button></div>';
+        uiModal(html);
+      }).catch(e => alert(liveErroMsg(e)));
+    }
+
+    function rankDel(key) {
+      if (!confirm('Apagar este registro do ranking?')) return;
+      liveGetDb().ref('ranking/' + key).remove().then(rankOpen);
+    }
+
     /* =================== FIM DO MODO AO VIVO =================== */
 
     if (!liveInit()) { init(); }
