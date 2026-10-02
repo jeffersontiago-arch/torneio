@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_29 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_30 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -847,6 +847,7 @@
           <h2 id="final-champion-name">NOME DO JOGADOR</h2>
         </div>
         <div id="premio-box" style="margin-top:22px; text-align:center;"></div>
+        <div id="premio-qr" style="margin-top:16px; text-align:center;"></div>
         <div id="rank-box" style="margin-top:14px; text-align:center;"></div>
         <button class="btn-nav" style="margin-top:20px;" onclick="switchTab('bracket')">🔍 REVISAR CHAVEAMENTO / TABELA</button>
       </div>
@@ -1082,6 +1083,7 @@
       renderPremio();
       rankSalvo = false;
       rankRenderBox();
+      premioQrCriar(winnerName);
       document.getElementById('btn-tab-champion').style.display = 'block';
       switchTab('champion');
     }
@@ -2270,6 +2272,12 @@
 
     function liveInit() {
       const params = new URLSearchParams(location.search);
+      const camp = params.get('campeao');
+      if (camp) {
+        document.getElementById('login-gate').style.display = 'none';
+        premioPaginaCampeao(camp.toLowerCase().replace(/[^a-z0-9]/g, ''));
+        return true;
+      }
       const novo = params.get('cadastro');
       if (novo) {
         // quem entra pelo link de inscrição não precisa de login
@@ -2344,10 +2352,7 @@
       return '';
     }
 
-    function renderPremio(alvo) {
-      const cfg = premioGet();
-      const box = document.getElementById(alvo || 'premio-box');
-      if (!box) return;
+    function premioHtml(cfg) {
       const redes = cfg.redes || {};
       const estilo = 'display:inline-block; text-decoration:none; margin:5px; font-size:16px; padding:10px 18px;';
       const links = PREMIO_REDES.filter(r => (redes[r.nome] || '').trim()).map(r => {
@@ -2365,7 +2370,12 @@
              <div>2️⃣ Envie uma mensagem no <b>privado</b> mostrando que você segue.</div>
              <div>3️⃣ Aguarde o nosso contato para receber o seu prêmio!</div>
            </div>`;
-      box.innerHTML = `<div class="section-title" style="font-size:22px;">🎁 COMO RECEBER O SEU PRÊMIO</div>${passos}<div>${links}</div>`;
+      return `<div class="section-title" style="font-size:22px;">🎁 COMO RECEBER O SEU PRÊMIO</div>${passos}<div>${links}</div>`;
+    }
+
+    function renderPremio(alvo) {
+      const box = document.getElementById(alvo || 'premio-box');
+      if (box) box.innerHTML = premioHtml(premioGet());
     }
 
     /* ---------- RANKING DE CAMPEÕES (todos os tempos, por formato) ---------- */
@@ -2443,6 +2453,74 @@
     function rankDel(key) {
       if (!confirm('Apagar este registro do ranking?')) return;
       liveGetDb().ref('ranking/' + key).remove().then(rankOpen).catch(e => alert(liveErroMsg(e)));
+    }
+
+    /* ---------- QR CODE DO CAMPEÃO: página própria com o prêmio e as redes ---------- */
+    let premioQrId = '';
+    let premioQrLink = '';
+
+    function premioQrCriar(nome) {
+      const box = document.getElementById('premio-qr');
+      if (!box) return;
+      box.innerHTML = '';
+      const db = liveGetDb();
+      if (!db || !rankUsuario()) return;
+      if (premioQrId) db.ref('campeoes/' + premioQrId).remove().catch(() => {});
+      const id = genRoomCode();
+      premioQrId = id;
+      const cfg = premioGet();
+      db.ref('campeoes/' + id).set({
+        nome: String(nome || '').slice(0, 60), formato: rankFormato().slice(0, 60),
+        texto: cfg.texto || '', redes: cfg.redes || {}, ts: Date.now()
+      }).then(() => {
+        if (premioQrId !== id) return;
+        premioQrLink = location.origin + location.pathname + '?campeao=' + id;
+        box.innerHTML = '<div style="font-size:18px; color:#ffea00; margin-bottom:8px;">📱 CAMPEÃO, APONTE A CÂMERA DO CELULAR AQUI!</div>'
+          + '<div id="premio-qr-img" style="display:inline-block; background:#fff; padding:10px; border-radius:12px; line-height:0;"></div>'
+          + '<div style="margin-top:8px;"><button class="btn-action btn-shuffle" style="font-size:15px; padding:8px 14px;" onclick="premioQrGrande()">MOSTRAR QR GRANDE 🔍</button></div>';
+        document.getElementById('premio-qr-img').appendChild(liveMakeQr(premioQrLink, 170));
+      }).catch(e => console.error(e));
+    }
+
+    function premioQrGrande() {
+      if (!premioQrLink) return;
+      const old = document.getElementById('live-qr-overlay'); if (old) old.remove();
+      const size = Math.min(520, Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.6));
+      const ov = document.createElement('div');
+      ov.id = 'live-qr-overlay';
+      ov.style.cssText = 'position:fixed; inset:0; background:rgba(12,3,29,0.96); z-index:10000; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; cursor:pointer;';
+      ov.onclick = () => ov.remove();
+      ov.innerHTML = '<div style="font-size:32px; color:#ffea00; margin-bottom:16px;">🏆 CAMPEÃO! APONTE A CÂMERA DO CELULAR PARA VER O SEU PRÊMIO!</div>';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#fff; padding:16px; border-radius:16px;';
+      box.appendChild(liveMakeQr(premioQrLink, size));
+      ov.appendChild(box);
+      const dica = document.createElement('div');
+      dica.style.cssText = 'margin-top:16px; color:#aaa; font-size:16px;';
+      dica.innerText = 'Clique em qualquer lugar para fechar';
+      ov.appendChild(dica);
+      document.body.appendChild(ov);
+    }
+
+    // página que o campeão abre pelo QR
+    function premioPaginaCampeao(id) {
+      const page = document.getElementById('viewer-page');
+      page.style.display = 'block';
+      document.querySelector('.container').style.display = 'none';
+      const h = page.querySelector('h1'); if (h) h.innerText = 'PARABÉNS, CAMPEÃO!';
+      const content = document.getElementById('viewer-content');
+      content.innerHTML = '<div class="section-title">Carregando...</div>';
+      const db = liveGetDb();
+      if (!db) { content.innerHTML = '<div class="section-title">Página indisponível no momento.</div>'; return; }
+      db.ref('campeoes/' + id).once('value').then(snap => {
+        const v = snap.val();
+        if (!v) { content.innerHTML = '<div class="section-title">Este link não é mais válido.</div>'; return; }
+        content.innerHTML = `<div style="text-align:center;">
+          <div style="font-size:64px;">🏆</div>
+          <div class="section-title" style="font-size:20px;">VOCÊ É O CAMPEÃO DO ${premioEsc(v.formato)}!</div>
+          <div style="font-size:30px; color:#ffea00; margin:10px 0 18px;">${premioEsc(v.nome)}</div>
+          ${premioHtml(v)}</div>`;
+      }).catch(() => { content.innerHTML = '<div class="section-title">Não consegui carregar. Tente de novo.</div>'; });
     }
 
     /* =================== FIM DO MODO AO VIVO =================== */
