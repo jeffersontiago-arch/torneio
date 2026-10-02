@@ -751,7 +751,6 @@
               <input type="text" id="hp-live" maxlength="20" placeholder="Meu nome na live" oninput="hostPerfilSave()">
               <input type="text" id="hp-nick" maxlength="20" placeholder="Meu apelido no jogo" oninput="hostPerfilSave()">
             </div>
-            <label style="display:block; margin-top:10px; font-size:14px;"><input type="checkbox" id="hp-auto" checked onchange="hostPerfilSave()"> Entrar já aprovado em toda sala nova (posso me remover depois)</label>
           </div>
         </div>
 
@@ -1747,7 +1746,7 @@
         });
       }).then(() => {
         const pf = hostPerfilGet();
-        if (pf.auto !== false && pf.nick) {
+        if (pf.nick) {
           const players = [pf.nick];
           for (let i = 2; i <= dados.teamSize; i++) players.push('Parceiro ' + i);
           return db.ref('salas/' + code + '/entries').push().set({ players: players, live: pf.live || '', status: 'aprovado', ts: Date.now() });
@@ -2264,8 +2263,7 @@
     function hostPerfilSave() {
       const p = {
         live: cleanName(document.getElementById('hp-live').value),
-        nick: cleanName(document.getElementById('hp-nick').value),
-        auto: document.getElementById('hp-auto').checked
+        nick: cleanName(document.getElementById('hp-nick').value)
       };
       try { localStorage.setItem('hostPerfil', JSON.stringify(p)); } catch (e) {}
     }
@@ -2274,7 +2272,6 @@
       const p = hostPerfilGet();
       document.getElementById('hp-live').value = p.live || '';
       document.getElementById('hp-nick').value = p.nick || '';
-      document.getElementById('hp-auto').checked = p.auto !== false;
     }
 
     /* =================== FIM DO MODO AO VIVO =================== */
