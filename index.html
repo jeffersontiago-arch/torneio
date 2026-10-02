@@ -792,6 +792,12 @@
 
         <div class="form-group" id="live-panel">
           <div class="section-title">📡 CADASTRO AO VIVO (SEUS INSCRITOS SE CADASTRAM PELO LINK)</div>
+          <div id="host-profile" style="margin-bottom:12px;">
+            <div class="section-title" style="font-size:16px;">MEU PERFIL (para eu já entrar na lista)</div>
+            <input type="text" id="hp-live" maxlength="20" placeholder="Meu nome na live" oninput="hostPerfilSave()" style="margin-bottom:8px; width:100%;">
+            <input type="text" id="hp-nick" maxlength="20" placeholder="Meu apelido no jogo" oninput="hostPerfilSave()" style="margin-bottom:8px; width:100%;">
+            <label><input type="checkbox" id="hp-auto" checked onchange="hostPerfilSave()"> Entrar já aprovado em toda sala nova (posso me remover depois)</label>
+          </div>
           <button class="btn-action btn-shuffle" id="btn-live-open" style="width:100%;" onclick="liveOpenRoom()">ABRIR INSCRIÇÕES AO VIVO 📡</button>
           <div id="live-status"></div>
         </div>
@@ -1737,6 +1743,13 @@
           hostUid: user.uid
         });
       }).then(() => {
+        const pf = hostPerfilGet();
+        if (pf.auto !== false && pf.nick) {
+          const players = [pf.nick];
+          for (let i = 2; i <= dados.teamSize; i++) players.push('Parceiro ' + i);
+          return db.ref('salas/' + code + '/entries').push().set({ players: players, live: pf.live || '', status: 'aprovado', ts: Date.now() });
+        }
+      }).then(() => {
         liveAttachHost(code);
       }).catch(err => alert('Não consegui abrir as inscrições: ' + liveErroMsg(err)));
     }
@@ -1784,9 +1797,11 @@
       if (!liveRoomCode || !liveMeta) {
         box.innerHTML = '';
         document.getElementById('btn-live-open').style.display = 'block';
+        document.getElementById('host-profile').style.display = 'block';
         return;
       }
       document.getElementById('btn-live-open').style.display = 'none';
+      document.getElementById('host-profile').style.display = 'none';
       const all = liveEntriesList(liveMeta);
       const ok = all.filter(e => e.status === 'aprovado');
       const pend = all.filter(e => e.status !== 'aprovado');
@@ -2236,9 +2251,31 @@
         liveViewerInit(novo.toLowerCase().replace(/[^a-z0-9]/g, ''));
         return true;
       }
+      hostPerfilLoad();
       liveGateStart();
       return false;
     }
+    /* ---------- MEU PERFIL: o organizador já entra aprovado em toda sala ---------- */
+    function hostPerfilGet() {
+      try { return JSON.parse(localStorage.getItem('hostPerfil') || '{}'); } catch (e) { return {}; }
+    }
+
+    function hostPerfilSave() {
+      const p = {
+        live: cleanName(document.getElementById('hp-live').value),
+        nick: cleanName(document.getElementById('hp-nick').value),
+        auto: document.getElementById('hp-auto').checked
+      };
+      try { localStorage.setItem('hostPerfil', JSON.stringify(p)); } catch (e) {}
+    }
+
+    function hostPerfilLoad() {
+      const p = hostPerfilGet();
+      document.getElementById('hp-live').value = p.live || '';
+      document.getElementById('hp-nick').value = p.nick || '';
+      document.getElementById('hp-auto').checked = p.auto !== false;
+    }
+
     /* =================== FIM DO MODO AO VIVO =================== */
 
     if (!liveInit()) { init(); }
