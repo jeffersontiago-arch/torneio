@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_28 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_29 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -735,6 +735,7 @@
     <div class="nav-buttons">
       <button class="btn-nav active" id="btn-tab-config" onclick="switchTab('config')">CONFIGURAR TIME/JOGADORES</button>
       <button class="btn-nav" id="btn-tab-bracket" onclick="switchTab('bracket')">VER RESULTADOS / CHAVEAMENTO</button>
+      <button class="btn-nav" id="btn-tab-ranking" onclick="rankOpen()">🏆 RANKING</button>
       <button class="btn-nav" id="btn-tab-champion" style="display:none;" onclick="switchTab('champion')">🏆 TELA DO CAMPEÃO</button>
     </div>
 
@@ -846,6 +847,7 @@
           <h2 id="final-champion-name">NOME DO JOGADOR</h2>
         </div>
         <div id="premio-box" style="margin-top:22px; text-align:center;"></div>
+        <div id="rank-box" style="margin-top:14px; text-align:center;"></div>
         <button class="btn-nav" style="margin-top:20px;" onclick="switchTab('bracket')">🔍 REVISAR CHAVEAMENTO / TABELA</button>
       </div>
     </div>
@@ -1078,6 +1080,8 @@
     function triggerVictoryScreen(winnerName) {
       document.getElementById('final-champion-name').innerText = winnerName;
       renderPremio();
+      rankSalvo = false;
+      rankRenderBox();
       document.getElementById('btn-tab-champion').style.display = 'block';
       switchTab('champion');
     }
@@ -2362,6 +2366,83 @@
              <div>3️⃣ Aguarde o nosso contato para receber o seu prêmio!</div>
            </div>`;
       box.innerHTML = `<div class="section-title" style="font-size:22px;">🎁 COMO RECEBER O SEU PRÊMIO</div>${passos}<div>${links}</div>`;
+    }
+
+    /* ---------- RANKING DE CAMPEÕES (todos os tempos, por formato) ---------- */
+    let rankSalvo = false;
+
+    function rankFormato() {
+      const sel = document.querySelector('#mode-selector .btn-option.selected');
+      return sel ? sel.innerText.trim() : currentMode;
+    }
+
+    function rankUsuario() {
+      return (typeof firebase !== 'undefined' && firebase.auth && liveGetDb()) ? firebase.auth().currentUser : null;
+    }
+
+    // mini formulário na tela do campeão
+    function rankRenderBox() {
+      const box = document.getElementById('rank-box');
+      if (!box) return;
+      if (!rankUsuario()) { box.innerHTML = ''; return; }
+      let ultimo = '';
+      try { ultimo = localStorage.getItem('rankPremio') || ''; } catch (e) {}
+      box.innerHTML = rankSalvo
+        ? '<div style="color:#38ef7d; font-size:18px;">✅ Campeão salvo no ranking!</div>'
+        : `<input type="text" id="rank-premio" maxlength="40" placeholder="Prêmio ganho (para o ranking)" value="${premioEsc(ultimo)}" style="width:min(320px, 90%);">
+           <button class="btn-action btn-generate" style="font-size:15px; padding:8px 14px;" onclick="rankSave()">SALVAR NO RANKING 🏆</button>`;
+    }
+
+    function rankSave() {
+      const nome = document.getElementById('final-champion-name').textContent.trim().slice(0, 60);
+      const premio = (document.getElementById('rank-premio').value || '').trim().slice(0, 40);
+      try { localStorage.setItem('rankPremio', premio); } catch (e) {}
+      liveGetDb().ref('ranking').push().set({ formato: rankFormato().slice(0, 60), campeao: nome, premio: premio, ts: Date.now() })
+        .then(() => { rankSalvo = true; rankRenderBox(); })
+        .catch(e => alert(liveErroMsg(e)));
+    }
+
+    function rankModal(html) {
+      const old = document.getElementById('rank-modal'); if (old) old.remove();
+      const m = document.createElement('div');
+      m.id = 'rank-modal';
+      m.style.cssText = 'position:fixed; inset:0; z-index:15000; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; padding:16px;';
+      m.innerHTML = '<div class="config-card" style="max-width:660px; width:100%; max-height:90vh; overflow:auto; margin:0;">' + html + '</div>';
+      document.body.appendChild(m);
+    }
+
+    function rankClose() {
+      const m = document.getElementById('rank-modal'); if (m) m.remove();
+    }
+
+    function rankOpen() {
+      const db = liveGetDb();
+      if (!db || !rankUsuario()) { alert('Entre com o Google para ver o ranking.'); return; }
+      db.ref('ranking').once('value').then(snap => {
+        const v = snap.val() || {};
+        const lista = Object.keys(v).map(k => ({ key: k, ...v[k] })).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        const formatos = Array.from(new Set(lista.map(x => x.formato)));
+        const medalhas = ['🥇', '🥈', '🥉'];
+        let html = '<div class="section-title" style="font-size:22px;">🏆 RANKING DE CAMPEÕES (TODOS OS TEMPOS)</div>';
+        if (!lista.length) html += '<div style="color:#aaa; margin:12px 0;">Nenhum campeão salvo ainda. Na tela do campeão, clique em "Salvar no ranking".</div>';
+        formatos.forEach(f => {
+          const dos = lista.filter(x => x.formato === f);
+          const cont = {};
+          dos.forEach(x => { const k = String(x.campeao || '').trim(); cont[k] = (cont[k] || 0) + 1; });
+          const top = Object.keys(cont).sort((a, b) => cont[b] - cont[a]);
+          html += `<div style="color:#00fbff; font-size:20px; margin-top:16px;">${premioEsc(f)}</div>`
+            + top.map((n, i) => `<div style="font-size:18px;">${medalhas[i] || (i + 1) + 'º'} ${premioEsc(n)} — ${cont[n]} vitória(s)</div>`).join('')
+            + '<div style="color:#aaa; margin:8px 0 2px;">Histórico:</div>'
+            + dos.map(x => `<div style="font-size:14px; display:flex; justify-content:space-between; gap:8px; border-bottom:1px solid #333; padding:4px 0;"><span>${new Date(x.ts).toLocaleDateString('pt-BR')} — ${premioEsc(x.campeao)} — prêmio: ${premioEsc(x.premio) || '-'}</span><button onclick="rankDel('${x.key}')" style="cursor:pointer; background:#c0392b; color:#fff; border:0; border-radius:6px;">✖</button></div>`).join('');
+        });
+        html += '<div class="action-buttons" style="margin-top:16px;"><button class="btn-action btn-shuffle" onclick="rankClose()">FECHAR</button></div>';
+        rankModal(html);
+      }).catch(e => alert(liveErroMsg(e)));
+    }
+
+    function rankDel(key) {
+      if (!confirm('Apagar este registro do ranking?')) return;
+      liveGetDb().ref('ranking/' + key).remove().then(rankOpen).catch(e => alert(liveErroMsg(e)));
     }
 
     /* =================== FIM DO MODO AO VIVO =================== */
