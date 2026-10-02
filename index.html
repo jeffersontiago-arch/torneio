@@ -744,6 +744,15 @@
         <div class="form-group">
           <div class="section-title">NOME DO CAMPEONATO</div>
           <input type="text" id="tournament-name-input" value="CAMPEONATO DE X1 DO(A) FULANO" oninput="updateTitle(this.value)">
+
+          <div id="host-profile" style="margin-top:14px;">
+            <div class="section-title" style="font-size:14px;">MEU PERFIL NO CAMPEONATO</div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px;">
+              <input type="text" id="hp-live" maxlength="20" placeholder="Meu nome na live" oninput="hostPerfilSave()">
+              <input type="text" id="hp-nick" maxlength="20" placeholder="Meu apelido no jogo" oninput="hostPerfilSave()">
+            </div>
+            <label style="display:block; margin-top:10px; font-size:14px;"><input type="checkbox" id="hp-auto" checked onchange="hostPerfilSave()"> Entrar já aprovado em toda sala nova (posso me remover depois)</label>
+          </div>
         </div>
 
         <div class="form-group">
@@ -792,12 +801,6 @@
 
         <div class="form-group" id="live-panel">
           <div class="section-title">📡 CADASTRO AO VIVO (SEUS INSCRITOS SE CADASTRAM PELO LINK)</div>
-          <div id="host-profile" style="margin-bottom:12px;">
-            <div class="section-title" style="font-size:16px;">MEU PERFIL (para eu já entrar na lista)</div>
-            <input type="text" id="hp-live" maxlength="20" placeholder="Meu nome na live" oninput="hostPerfilSave()" style="margin-bottom:8px; width:100%;">
-            <input type="text" id="hp-nick" maxlength="20" placeholder="Meu apelido no jogo" oninput="hostPerfilSave()" style="margin-bottom:8px; width:100%;">
-            <label><input type="checkbox" id="hp-auto" checked onchange="hostPerfilSave()"> Entrar já aprovado em toda sala nova (posso me remover depois)</label>
-          </div>
           <button class="btn-action btn-shuffle" id="btn-live-open" style="width:100%;" onclick="liveOpenRoom()">ABRIR INSCRIÇÕES AO VIVO 📡</button>
           <div id="live-status"></div>
         </div>
@@ -1797,11 +1800,9 @@
       if (!liveRoomCode || !liveMeta) {
         box.innerHTML = '';
         document.getElementById('btn-live-open').style.display = 'block';
-        document.getElementById('host-profile').style.display = 'block';
         return;
       }
       document.getElementById('btn-live-open').style.display = 'none';
-      document.getElementById('host-profile').style.display = 'none';
       const all = liveEntriesList(liveMeta);
       const ok = all.filter(e => e.status === 'aprovado');
       const pend = all.filter(e => e.status !== 'aprovado');
