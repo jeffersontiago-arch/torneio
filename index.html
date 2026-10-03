@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_35 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_36 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -1672,6 +1672,9 @@
     };
 
     let liveDb = null;
+    let liveUid = '';                                   // conta Google logada (cada conta tem os seus próprios dados)
+    function lsk(n) { return n + '_' + (liveUid || 'anon'); }
+    function meuUid() { const u = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null; return u ? u.uid : '_'; }
     let liveRoomCode = null;
     let liveMeta = null;
     let liveViewerKey = null;
@@ -1793,12 +1796,12 @@
       if (!db) return;
       if (liveRoomCode) db.ref('salas/' + liveRoomCode).off();
       liveRoomCode = code;
-      try { localStorage.setItem('liveHostRoom', code); } catch (e) {}
+      try { localStorage.setItem(lsk('liveHostRoom'), code); } catch (e) {}
       db.ref('salas/' + code).on('value', snap => {
         liveMeta = snap.val();
         if (!liveMeta) {
           liveRoomCode = null;
-          try { localStorage.removeItem('liveHostRoom'); } catch (e) {}
+          try { localStorage.removeItem(lsk('liveHostRoom')); } catch (e) {}
         } else {
           liveAutoApprove();
           liveSyncAprovados();
@@ -2046,7 +2049,7 @@
       const db = liveGetDb();
       liveRoomCode = null;
       liveMeta = null;
-      try { localStorage.removeItem('liveHostRoom'); } catch (e) {}
+      try { localStorage.removeItem(lsk('liveHostRoom')); } catch (e) {}
       const ov = document.getElementById('live-qr-overlay');
       if (ov) ov.remove();
       if (db) {
@@ -2248,7 +2251,7 @@
         try {
           const chaves = players.map(normTxt).filter(Boolean).map(n => 'n_' + n);
           if (h) chaves.push(h);
-          const res = await Promise.all(chaves.map(k => db.ref('banidos/' + k).once('value')));
+          const res = await Promise.all(chaves.map(k => db.ref('banidos/' + (room.hostUid || '_') + '/' + k).once('value')));
           if (res.some(sn => sn.val() === true)) { msg.innerText = MSG_BAN; liveViewerCheck(); return; }
         } catch (e) {}
         if (trava && room.ips && room.ips[h]) { msg.innerText = MSG_IP; liveViewerCheck(); return; }
@@ -2295,6 +2298,8 @@
       }
       firebase.auth().onAuthStateChanged(u => {
         if (!u) {
+          liveDetach();
+          liveUid = '';
           msg.innerText = 'Entre com sua conta Google para usar o painel.';
           btn.style.display = 'block';
           out.style.display = 'none';
@@ -2305,6 +2310,10 @@
         const autorizado = u.emailVerified && EMAILS_AUTORIZADOS.map(e => e.toLowerCase()).indexOf(email) !== -1;
         if (autorizado) {
           gate.style.display = 'none';
+          if (liveUid && liveUid !== u.uid) liveDetach();
+          liveUid = u.uid;
+          hostPerfilLoad();
+          premioLoad();
           liveReconnectHost(u);
         } else {
           msg.innerText = 'Acesso negado. A conta ' + email + ' não está autorizada.';
@@ -2316,14 +2325,24 @@
     }
 
     // host: reconecta na sala aberta antes de recarregar a página
+    function liveDetach() {
+      const db = liveGetDb();
+      if (db && liveRoomCode) db.ref('salas/' + liveRoomCode).off();
+      liveRoomCode = null;
+      liveMeta = null;
+      premioQrId = '';
+      premioQrLink = '';
+      liveRenderHost();
+    }
+
     function liveReconnectHost(u) {
       try {
-        const saved = localStorage.getItem('liveHostRoom');
+        const saved = localStorage.getItem(lsk('liveHostRoom'));
         const db = liveGetDb();
         if (!saved || !db || liveRoomCode) return;
         db.ref('salas/' + saved).once('value').then(s => {
           const v = s.val();
-          if (v && !liveRoomCode) liveAttachHost(saved);
+          if (v && v.hostUid === u.uid && !liveRoomCode) liveAttachHost(saved);
         }).catch(() => {});
       } catch (e) {}
     }
@@ -2350,7 +2369,7 @@
     }
     /* ---------- MEU PERFIL: o organizador já entra aprovado em toda sala ---------- */
     function hostPerfilGet() {
-      try { return JSON.parse(localStorage.getItem('hostPerfil') || '{}'); } catch (e) { return {}; }
+      try { return JSON.parse(localStorage.getItem(lsk('hostPerfil')) || '{}'); } catch (e) { return {}; }
     }
 
     function hostPerfilSave() {
@@ -2358,7 +2377,7 @@
         live: cleanName(document.getElementById('hp-live').value),
         nick: cleanName(document.getElementById('hp-nick').value)
       };
-      try { localStorage.setItem('hostPerfil', JSON.stringify(p)); } catch (e) {}
+      try { localStorage.setItem(lsk('hostPerfil'), JSON.stringify(p)); } catch (e) {}
     }
 
     function hostPerfilLoad() {
@@ -2378,14 +2397,14 @@
     }
 
     function premioGet() {
-      try { return JSON.parse(localStorage.getItem('premioCfg') || '{}'); } catch (e) { return {}; }
+      try { return JSON.parse(localStorage.getItem(lsk('premioCfg')) || '{}'); } catch (e) { return {}; }
     }
 
     function premioSave() {
       const redes = {};
       PREMIO_REDES.forEach(r => { redes[r.nome] = document.getElementById('pr-' + r.nome).value.trim(); });
       const cfg = { texto: document.getElementById('pr-texto').value.trim().slice(0, 300), redes: redes };
-      try { localStorage.setItem('premioCfg', JSON.stringify(cfg)); } catch (e) {}
+      try { localStorage.setItem(lsk('premioCfg'), JSON.stringify(cfg)); } catch (e) {}
       renderPremio('premio-previa');
     }
 
@@ -2454,7 +2473,7 @@
       if (!box) return;
       if (!rankUsuario()) { box.innerHTML = ''; return; }
       let ultimo = '';
-      try { ultimo = localStorage.getItem('rankPremio') || ''; } catch (e) {}
+      try { ultimo = localStorage.getItem(lsk('rankPremio')) || ''; } catch (e) {}
       box.innerHTML = rankSalvo
         ? '<div style="color:#38ef7d; font-size:18px;">✅ Campeão salvo no ranking!</div>'
         : `<input type="text" id="rank-premio" maxlength="40" placeholder="Prêmio ganho (para o ranking)" value="${premioEsc(ultimo)}" style="width:min(320px, 90%);">
@@ -2464,8 +2483,8 @@
     function rankSave() {
       const nome = document.getElementById('final-champion-name').textContent.trim().slice(0, 60);
       const premio = (document.getElementById('rank-premio').value || '').trim().slice(0, 40);
-      try { localStorage.setItem('rankPremio', premio); } catch (e) {}
-      liveGetDb().ref('ranking').push().set({ formato: rankFormato().slice(0, 60), campeao: nome, premio: premio, ts: Date.now() })
+      try { localStorage.setItem(lsk('rankPremio'), premio); } catch (e) {}
+      liveGetDb().ref('ranking/' + meuUid()).push().set({ formato: rankFormato().slice(0, 60), campeao: nome, premio: premio, ts: Date.now() })
         .then(() => { rankSalvo = true; rankRenderBox(); })
         .catch(e => alert(liveErroMsg(e)));
     }
@@ -2486,7 +2505,7 @@
     function rankOpen() {
       const db = liveGetDb();
       if (!db || !rankUsuario()) { alert('Entre com o Google para ver o ranking.'); return; }
-      db.ref('ranking').once('value').then(snap => {
+      db.ref('ranking/' + meuUid()).once('value').then(snap => {
         const v = snap.val() || {};
         const lista = Object.keys(v).map(k => ({ key: k, ...v[k] })).sort((a, b) => (b.ts || 0) - (a.ts || 0));
         const formatos = Array.from(new Set(lista.map(x => x.formato)));
@@ -2510,7 +2529,7 @@
 
     function rankDel(key) {
       if (!confirm('Apagar este registro do ranking?')) return;
-      liveGetDb().ref('ranking/' + key).remove().then(rankOpen).catch(e => alert(liveErroMsg(e)));
+      liveGetDb().ref('ranking/' + meuUid() + '/' + key).remove().then(rankOpen).catch(e => alert(liveErroMsg(e)));
     }
 
     /* ---------- QR CODE DO CAMPEÃO: página própria com o prêmio e as redes ---------- */
@@ -2528,7 +2547,7 @@
       premioQrId = id;
       const cfg = premioGet();
       db.ref('campeoes/' + id).set({
-        nome: String(nome || '').slice(0, 60), formato: rankFormato().slice(0, 60),
+        dono: meuUid(), nome: String(nome || '').slice(0, 60), formato: rankFormato().slice(0, 60),
         texto: cfg.texto || '', redes: cfg.redes || {}, ts: Date.now()
       }).then(() => {
         if (premioQrId !== id) return;
@@ -2694,8 +2713,8 @@
       Object.keys(ips).forEach(h => { if (ips[h] === key) chaves.push(h); });          // a internet dela (embaralhada)
       (e.players || []).map(normTxt).filter(Boolean).forEach(n => chaves.push('n_' + n)); // e o apelido
       const up = {};
-      chaves.forEach(k => { up['banidos/' + k] = true; });
-      up['castigo/c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { nick: nick, live: live, chaves: chaves, ts: Date.now() };
+      chaves.forEach(k => { up['banidos/' + meuUid() + '/' + k] = true; });
+      up['castigo/' + meuUid() + '/c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { nick: nick, live: live, chaves: chaves, ts: Date.now() };
       up['salas/' + liveRoomCode + '/entries/' + key] = null;
       liveGetDb().ref().update(up).catch(err => alert(liveErroMsg(err)));
     }
@@ -2703,7 +2722,7 @@
     function castigoOpen() {
       const db = liveGetDb();
       if (!db || !rankUsuario()) { alert('Entre com o Google para ver o Cantinho do Castigo.'); return; }
-      db.ref('castigo').once('value').then(snap => {
+      db.ref('castigo/' + meuUid()).once('value').then(snap => {
         const v = snap.val() || {};
         const lista = Object.keys(v).map(k => ({ id: k, ...v[k] })).sort((a, b) => (b.ts || 0) - (a.ts || 0));
         let html = '<div class="section-title" style="font-size:22px;">🚫 CANTINHO DO CASTIGO</div>';
@@ -2719,13 +2738,13 @@
 
     function castigoPerdoar(id) {
       const db = liveGetDb();
-      db.ref('castigo/' + id).once('value').then(snap => {
+      db.ref('castigo/' + meuUid() + '/' + id).once('value').then(snap => {
         const v = snap.val();
         if (!v) return;
         if (!confirm('Perdoar ' + v.nick + '? Ele poderá se inscrever de novo.')) return;
         const up = {};
-        (v.chaves || []).forEach(k => { up['banidos/' + k] = null; });
-        up['castigo/' + id] = null;
+        (v.chaves || []).forEach(k => { up['banidos/' + meuUid() + '/' + k] = null; });
+        up['castigo/' + meuUid() + '/' + id] = null;
         return db.ref().update(up).then(castigoOpen);
       }).catch(e => alert(liveErroMsg(e)));
     }
