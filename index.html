@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_33 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_34 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -1771,6 +1771,7 @@
           ...dados,
           open: true,
           aprovacao: true,
+          trancaIp: true,
           senha: sorteiaPalavra(''),
           hostUid: user.uid
         });
@@ -1800,6 +1801,7 @@
         } else {
           liveAutoApprove();
           liveSyncAprovados();
+          liveSyncIps();
         }
         liveRenderHost();
       });
@@ -1860,6 +1862,7 @@
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveCopyLink()">COPIAR LINK 📋</button>
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveTrocaPalavra()">TROCAR PALAVRA 🔄</button>
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveToggleAprovacao()">APROVAÇÃO: ${aprov ? 'LIGADA ✅' : 'DESLIGADA'}</button>
+            <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveToggleIp()">TRAVA DE IP: ${liveMeta.trancaIp === false ? 'DESLIGADA' : 'LIGADA ✅'}</button>
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="codigoOpen()">CÓDIGO DA SALA 🔑</button>
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveToggleOpen()">${liveMeta.open ? 'FECHAR INSCRIÇÕES (COMPLETA COM BOTS)' : 'REABRIR INSCRIÇÕES'}</button>
           </div>
@@ -2233,17 +2236,32 @@
       if (players.some(p => usados.indexOf(normTxt(p)) !== -1)) { msg.innerText = 'Esse apelido já está na lista. Escolha outro!'; return; }
       if (all.length >= room.slots * 4) { msg.innerText = 'Muita gente tentando agora. Espere um pouquinho e tente de novo.'; return; }
 
-      const ref = db.ref('salas/' + code + '/entries').push();
-      liveViewerKey = ref.key;
-      liveViewerRejected = false;
-      try { localStorage.setItem('inscrito_' + code, ref.key); } catch (e) {}
-      ref.set({ players: players, live: live, status: 'pendente', ts: Date.now(), uid: (firebase.auth().currentUser ? firebase.auth().currentUser.uid : null) }).catch(() => {
-        liveViewerKey = null;
-        try { localStorage.removeItem('inscrito_' + code); } catch (e) {}
-        liveViewerState = '';
-        const m2 = document.getElementById('viewer-msg');
-        if (m2) m2.innerText = 'As inscrições estão fechadas ou deu erro. Tente de novo.';
-      });
+      const trava = room.trancaIp !== false;
+      const botao = document.getElementById('viewer-btn');
+      if (botao) botao.disabled = true;
+      (async () => {
+        let h = '';
+        if (trava) {
+          h = await liveIpHash();
+          if (!h) { msg.innerText = 'Não consegui verificar a sua internet. Desligue o bloqueador de anúncios e tente de novo.'; liveViewerCheck(); return; }
+          if (room.ips && room.ips[h]) { msg.innerText = MSG_IP; liveViewerCheck(); return; }
+        }
+        const key = db.ref('salas/' + code + '/entries').push().key;
+        liveViewerKey = key;
+        liveViewerRejected = false;
+        try { localStorage.setItem('inscrito_' + code, key); } catch (e) {}
+        const up = {};
+        up['salas/' + code + '/entries/' + key] = { players: players, live: live, status: 'pendente', ts: Date.now(), uid: (firebase.auth().currentUser ? firebase.auth().currentUser.uid : null) };
+        if (h) up['salas/' + code + '/ips/' + h] = key;
+        db.ref().update(up).catch(() => {
+          liveViewerKey = null;
+          try { localStorage.removeItem('inscrito_' + code); } catch (e) {}
+          liveViewerState = '';
+          const m2 = document.getElementById('viewer-msg');
+          if (m2) m2.innerText = trava ? MSG_IP : 'As inscrições estão fechadas ou deu erro. Tente de novo.';
+          liveViewerCheck();
+        });
+      })();
     }
 
     /* ---------- LOGIN DO ORGANIZADOR (tela que bloqueia o painel) ---------- */
@@ -2610,6 +2628,49 @@
         liveViewerCodigoOn = false;
         box.innerHTML = '';
       }
+    }
+
+    /* ---------- TRAVA: UMA INSCRIÇÃO POR INTERNET (IP da casa) ---------- */
+    const MSG_IP = 'Opa! Já existe uma inscrição vinda da internet da sua casa. Só pode uma por casa! 😊 Se for outra pessoa da sua casa, peça ajuda ao organizador.';
+
+    // o IP nunca é guardado: só uma versão embaralhada (hash) dele, apagada junto com a sala
+    async function liveHashIp(ip) {
+      const texto = 'tg-ip-v1|' + ip;
+      if (window.crypto && crypto.subtle) {
+        const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
+        return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+      }
+      let x = 5381;
+      for (let i = 0; i < texto.length; i++) x = ((x << 5) + x + texto.charCodeAt(i)) >>> 0;
+      return 'f' + x.toString(16).padStart(8, '0');
+    }
+
+    async function liveIpHash() {
+      async function pega(url) {
+        const r = await fetch(url, { cache: 'no-store' });
+        const j = await r.json();
+        return String(j.ip || '').trim();
+      }
+      let ip = '';
+      try { ip = await pega('https://api.ipify.org?format=json'); } catch (e) {}          // IPv4 da casa
+      if (!ip) { try { ip = await pega('https://api6.ipify.org?format=json'); } catch (e) {} } // só IPv6
+      if (!ip) return '';
+      if (ip.indexOf(':') !== -1) ip = ip.split(':').slice(0, 4).join(':');                  // prefixo da rede
+      return liveHashIp(ip);
+    }
+
+    // host: libera a internet de quem foi removido/recusado
+    function liveSyncIps() {
+      if (!liveMeta || !liveRoomCode || !liveMeta.ips) return;
+      const ent = liveMeta.entries || {};
+      const up = {};
+      let n = 0;
+      Object.keys(liveMeta.ips).forEach(h => { if (!ent[liveMeta.ips[h]]) { up['ips/' + h] = null; n++; } });
+      if (n) liveRoomRef().update(up).catch(() => {});
+    }
+
+    function liveToggleIp() {
+      liveRoomRef().child('trancaIp').set(liveMeta.trancaIp === false);
     }
 
     /* =================== FIM DO MODO AO VIVO =================== */
