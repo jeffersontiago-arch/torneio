@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_32 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_33 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -824,12 +824,14 @@
           <div id="live-status"></div>
         </div>
 
-        <div class="section-title" id="participants-section-title">PARTICIPANTES (10 JOGADORES)</div>
-        <div class="players-grid" id="players-input-container"></div>
+        <div id="manual-participants" style="display:none;">
+          <div class="section-title" id="participants-section-title">PARTICIPANTES (10 JOGADORES)</div>
+          <div class="players-grid" id="players-input-container"></div>
 
-        <div class="action-buttons">
-          <button class="btn-action btn-shuffle" onclick="shufflePlayers()">EMBARALHAR 🔀</button>
-          <button class="btn-action btn-generate" onclick="generateAndSwitch()">GERAR TORNEIO ⚔️</button>
+          <div class="action-buttons">
+            <button class="btn-action btn-shuffle" onclick="shufflePlayers()">EMBARALHAR 🔀</button>
+            <button class="btn-action btn-generate" onclick="generateAndSwitch()">GERAR TORNEIO ⚔️</button>
+          </div>
         </div>
 
       </div>
@@ -1887,6 +1889,7 @@
           </div>` : ''}
 
           <div class="action-buttons" style="margin-top:14px;">
+            <button class="btn-action btn-shuffle" ${ok.length > 1 ? '' : 'disabled style="opacity:0.4; cursor:not-allowed;"'} onclick="liveShuffle()">EMBARALHAR 🔀</button>
             <button class="btn-action btn-generate" ${full ? '' : 'disabled style="opacity:0.4; cursor:not-allowed;"'} onclick="liveGenerate()">GERAR CAMPEONATO COM OS INSCRITOS ⚔️</button>
           </div>
           <div style="text-align:center; margin-top:10px;">
@@ -1934,6 +1937,22 @@
       dica.innerText = 'Clique em qualquer lugar para fechar';
       ov.appendChild(dica);
       document.body.appendChild(ov);
+    }
+
+    // embaralha a ordem de todos os inscritos aprovados (a ordem define os confrontos)
+    function liveShuffle() {
+      if (!liveMeta) return;
+      const ok = liveApproved();
+      if (ok.length < 2) return;
+      const base = Math.min.apply(null, ok.map(e => e.ts || 0));
+      const ordem = ok.map(e => e.key);
+      for (let i = ordem.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = ordem[i]; ordem[i] = ordem[j]; ordem[j] = t;
+      }
+      const up = {};
+      ordem.forEach((k, i) => { up['entries/' + k + '/ts'] = base + i; });
+      liveRoomRef().update(up).catch(e => alert(liveErroMsg(e)));
     }
 
     function liveCopyLink() {
