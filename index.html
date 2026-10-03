@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_30 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_32 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -1797,6 +1797,7 @@
           try { localStorage.removeItem('liveHostRoom'); } catch (e) {}
         } else {
           liveAutoApprove();
+          liveSyncAprovados();
         }
         liveRenderHost();
       });
@@ -1857,6 +1858,7 @@
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveCopyLink()">COPIAR LINK 📋</button>
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveTrocaPalavra()">TROCAR PALAVRA 🔄</button>
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveToggleAprovacao()">APROVAÇÃO: ${aprov ? 'LIGADA ✅' : 'DESLIGADA'}</button>
+            <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="codigoOpen()">CÓDIGO DA SALA 🔑</button>
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveToggleOpen()">${liveMeta.open ? 'FECHAR INSCRIÇÕES (COMPLETA COM BOTS)' : 'REABRIR INSCRIÇÕES'}</button>
           </div>
 
@@ -2025,6 +2027,7 @@
       if (ov) ov.remove();
       if (db) {
         db.ref('salas/' + code).off();
+        db.ref('codigos/' + code).remove().catch(() => {});
         db.ref('salas/' + code).remove().catch(() => {});
       }
       liveRenderHost();
@@ -2032,6 +2035,7 @@
 
     function liveCloseRoom() {
       if (!confirm('Encerrar e apagar tudo? Os inscritos não conseguirão mais entrar e os apelidos serão apagados do banco.')) return;
+      liveGetDb().ref('codigos/' + liveRoomCode).remove().catch(() => {});
       liveRoomRef().remove();
     }
 
@@ -2077,11 +2081,21 @@
 
     /* ---------- LADO DO INSCRITO (quem entra pelo link) ---------- */
     function liveViewerInit(code) {
+      document.querySelector('.container').style.display = 'none';
+      document.getElementById('viewer-page').style.display = 'block';
+      const db = liveGetDb();
+      if (!db) { liveViewerInitCore(code); return; }
+      let login;
+      try { login = firebase.auth().signInAnonymously(); } catch (e) { login = Promise.reject(e); }
+      login.then(() => liveViewerInitCore(code)).catch(() => liveViewerInitCore(code));
+    }
+
+    function liveViewerInitCore(code) {
       const page = document.getElementById('viewer-page');
       page.style.display = 'block';
       document.querySelector('.container').style.display = 'none';
       const content = document.getElementById('viewer-content');
-      content.innerHTML = '<div id="viewer-top"></div><div id="viewer-list"></div>';
+      content.innerHTML = '<div id="viewer-top"></div><div id="viewer-codigo"></div><div id="viewer-list"></div>';
 
       const db = liveGetDb();
       if (!db) {
@@ -2106,6 +2120,7 @@
         const full = ok.length >= room.slots;
         const closed = !room.open || full;
         const mine = liveViewerKey ? all.find(e => e.key === liveViewerKey) : null;
+        liveViewerCodigo(code, db, room);
 
         if (liveViewerKey && !mine) {
           // se a inscrição existia e sumiu, foi recusada
@@ -2203,7 +2218,7 @@
       liveViewerKey = ref.key;
       liveViewerRejected = false;
       try { localStorage.setItem('inscrito_' + code, ref.key); } catch (e) {}
-      ref.set({ players: players, live: live, status: 'pendente', ts: Date.now() }).catch(() => {
+      ref.set({ players: players, live: live, status: 'pendente', ts: Date.now(), uid: (firebase.auth().currentUser ? firebase.auth().currentUser.uid : null) }).catch(() => {
         liveViewerKey = null;
         try { localStorage.removeItem('inscrito_' + code); } catch (e) {}
         liveViewerState = '';
@@ -2521,6 +2536,61 @@
           <div style="font-size:30px; color:#ffea00; margin:10px 0 18px;">${premioEsc(v.nome)}</div>
           ${premioHtml(v)}</div>`;
       }).catch(() => { content.innerHTML = '<div class="section-title">Não consegui carregar. Tente de novo.</div>'; });
+    }
+
+    /* ---------- CÓDIGO DA SALA (só aparece para quem foi aprovado) ---------- */
+    // mantém a lista de aprovados (uid anônimo de cada inscrito) em sincronia com o status
+    function liveSyncAprovados() {
+      if (!liveMeta || !liveRoomCode) return;
+      const querem = {};
+      liveEntriesList(liveMeta).forEach(e => { if (e.status === 'aprovado' && e.uid) querem[e.uid] = true; });
+      const tem = liveMeta.aprovados || {};
+      const up = {};
+      let n = 0;
+      Object.keys(querem).forEach(u => { if (!tem[u]) { up['aprovados/' + u] = true; n++; } });
+      Object.keys(tem).forEach(u => { if (!querem[u]) { up['aprovados/' + u] = null; n++; } });
+      if (n) liveRoomRef().update(up).catch(() => {});
+    }
+
+    function codigoOpen() {
+      if (!liveRoomCode) return;
+      liveGetDb().ref('codigos/' + liveRoomCode).once('value').then(s => {
+        rankModal(`<div class="section-title" style="font-size:22px;">🔑 CÓDIGO DA SALA</div>
+          <div style="margin:8px 0 12px;">Digite o código da sala do jogo. Ele aparece na tela de quem você aprovar, e só para essas pessoas. Deixe vazio e clique em OK para apagar o código.</div>
+          <input type="text" id="cod-valor" maxlength="30" placeholder="Código da sala do jogo" value="${premioEsc(s.val())}">
+          <div class="action-buttons" style="margin-top:14px;">
+            <button class="btn-action btn-generate" onclick="codigoSave()">OK</button>
+            <button class="btn-action btn-shuffle" onclick="rankClose()">CANCELAR</button>
+          </div>`);
+        const i = document.getElementById('cod-valor'); if (i) i.focus();
+      }).catch(e => alert(liveErroMsg(e)));
+    }
+
+    function codigoSave() {
+      const v = document.getElementById('cod-valor').value.trim().slice(0, 30);
+      const ref = liveGetDb().ref('codigos/' + liveRoomCode);
+      (v ? ref.set(v) : ref.remove()).then(rankClose).catch(e => alert(liveErroMsg(e)));
+    }
+
+    let liveViewerCodigoOn = false;
+
+    function liveViewerCodigo(code, db, room) {
+      const uid = firebase.auth().currentUser ? firebase.auth().currentUser.uid : null;
+      const liberado = !!(uid && room.aprovados && room.aprovados[uid] === true);
+      const box = document.getElementById('viewer-codigo');
+      if (liberado && !liveViewerCodigoOn) {
+        liveViewerCodigoOn = true;
+        db.ref('codigos/' + code).on('value', s => {
+          const v = s.val();
+          box.innerHTML = v
+            ? `<div class="solo-match-card" style="text-align:center; margin:14px 0;"><div class="section-title">🔑 CÓDIGO DA SALA</div><div style="font-size:42px; color:#38ef7d; letter-spacing:3px; word-break:break-all;">${premioEsc(v)}</div></div>`
+            : '<div style="margin:14px 0; color:#ffea00;">🔑 O código da sala ainda não foi liberado. Fique de olho!</div>';
+        }, () => { liveViewerCodigoOn = false; });
+      } else if (!liberado && liveViewerCodigoOn) {
+        db.ref('codigos/' + code).off();
+        liveViewerCodigoOn = false;
+        box.innerHTML = '';
+      }
     }
 
     /* =================== FIM DO MODO AO VIVO =================== */
