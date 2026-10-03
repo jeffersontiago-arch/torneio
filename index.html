@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_36 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_37 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -760,8 +760,9 @@
         <div class="form-group">
           <details id="premio-config">
             <summary class="section-title" style="cursor:pointer;">🎁 PRÊMIO E REDES SOCIAIS (aparece para o campeão)</summary>
-            <div style="margin:10px 0 6px;">Como o campeão recebe o prêmio (deixe vazio para usar o texto padrão):</div>
+            <div style="margin:10px 0 6px;">Como o campeão recebe o prêmio (já vem com um texto pronto, é só editar se quiser):</div>
             <textarea id="pr-texto" rows="3" maxlength="300" oninput="premioSave()" placeholder="Ex.: Siga todas as redes e mande mensagem no privado para receber o prêmio!" style="width:100%; background:#0c041a; border:3px solid #000; border-radius:12px; padding:10px 12px; color:#fff; font-family:'Lilita One', cursive; font-size:16px; outline:none;"></textarea>
+            <button type="button" class="btn-action btn-shuffle" style="font-size:14px; padding:6px 12px; margin-top:8px;" onclick="premioRestaurarTexto()">↩ RESTAURAR TEXTO PADRÃO</button>
             <div style="margin:12px 0 6px;">Suas redes sociais (link completo ou só o @usuário; preencha só as que usa):</div>
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px;">
               <input type="text" id="pr-Instagram" maxlength="200" placeholder="Link ou @usuário do Instagram" oninput="premioSave()">
@@ -2396,8 +2397,18 @@
       return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     }
 
+    const PREMIO_TEXTO_PADRAO = '1️⃣ Siga todas as redes sociais abaixo.\n2️⃣ Envie uma mensagem no privado mostrando que você segue e qual torneio você ganhou.\n3️⃣ Aguarde o nosso contato para receber o seu prêmio! 🎁';
+
     function premioGet() {
-      try { return JSON.parse(localStorage.getItem(lsk('premioCfg')) || '{}'); } catch (e) { return {}; }
+      let c = {};
+      try { c = JSON.parse(localStorage.getItem(lsk('premioCfg')) || '{}'); } catch (e) {}
+      if (typeof c.texto !== 'string') c.texto = PREMIO_TEXTO_PADRAO;   // já vem com um texto pronto
+      return c;
+    }
+
+    function premioRestaurarTexto() {
+      document.getElementById('pr-texto').value = PREMIO_TEXTO_PADRAO;
+      premioSave();
     }
 
     function premioSave() {
