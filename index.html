@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_34 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_35 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -736,6 +736,7 @@
       <button class="btn-nav active" id="btn-tab-config" onclick="switchTab('config')">CONFIGURAR TIME/JOGADORES</button>
       <button class="btn-nav" id="btn-tab-bracket" onclick="switchTab('bracket')">VER RESULTADOS / CHAVEAMENTO</button>
       <button class="btn-nav" id="btn-tab-ranking" onclick="rankOpen()">🏆 RANKING</button>
+      <button class="btn-nav" id="btn-tab-castigo" onclick="castigoOpen()">🚫 CANTINHO DO CASTIGO</button>
       <button class="btn-nav" id="btn-tab-champion" style="display:none;" onclick="switchTab('champion')">🏆 TELA DO CAMPEÃO</button>
     </div>
 
@@ -1874,7 +1875,7 @@
             ${ok.map((e, i) => `
               <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #000; border-radius:10px; padding:6px 10px; margin-bottom:6px; background:#1a0b34;">
                 <span>${i + 1}. ${liveNomeEntry(e)}</span>
-                <button onclick="liveRemoveEntry('${e.key}')" style="${btnStyle} background:#c0392b;">✖ REMOVER</button>
+                <span><button onclick="liveRemoveEntry('${e.key}')" style="${btnStyle} background:#c0392b;">✖ REMOVER</button> ${/^Bot\d+$/.test((e.players || [])[0] || '') ? '' : `<button onclick="liveBanir('${e.key}')" style="${btnStyle} background:#222; border-color:#c0392b;">🚫 BANIR</button>`}</span>
               </div>`).join('') || '<div style="color:#aaa;">Nenhum aprovado ainda...</div>'}
           </div>
 
@@ -1887,6 +1888,7 @@
                 <span>
                   <button onclick="liveApprove('${e.key}')" style="${btnStyle} background:#27ae60;">✔ APROVAR</button>
                   <button onclick="liveRemoveEntry('${e.key}')" style="${btnStyle} background:#c0392b;">✖ RECUSAR</button>
+                  ${/^Bot\d+$/.test((e.players || [])[0] || '') ? '' : `<button onclick="liveBanir('${e.key}')" style="${btnStyle} background:#222; border-color:#c0392b;">🚫 BANIR</button>`}
                 </span>
               </div>`).join('')}
           </div>` : ''}
@@ -2240,19 +2242,23 @@
       const botao = document.getElementById('viewer-btn');
       if (botao) botao.disabled = true;
       (async () => {
-        let h = '';
-        if (trava) {
-          h = await liveIpHash();
-          if (!h) { msg.innerText = 'Não consegui verificar a sua internet. Desligue o bloqueador de anúncios e tente de novo.'; liveViewerCheck(); return; }
-          if (room.ips && room.ips[h]) { msg.innerText = MSG_IP; liveViewerCheck(); return; }
-        }
+        const h = await liveIpHash();
+        if (!h && trava) { msg.innerText = 'Não consegui verificar a sua internet. Desligue o bloqueador de anúncios e tente de novo.'; liveViewerCheck(); return; }
+        // cantinho do castigo: a internet ou o apelido já banidos
+        try {
+          const chaves = players.map(normTxt).filter(Boolean).map(n => 'n_' + n);
+          if (h) chaves.push(h);
+          const res = await Promise.all(chaves.map(k => db.ref('banidos/' + k).once('value')));
+          if (res.some(sn => sn.val() === true)) { msg.innerText = MSG_BAN; liveViewerCheck(); return; }
+        } catch (e) {}
+        if (trava && room.ips && room.ips[h]) { msg.innerText = MSG_IP; liveViewerCheck(); return; }
         const key = db.ref('salas/' + code + '/entries').push().key;
         liveViewerKey = key;
         liveViewerRejected = false;
         try { localStorage.setItem('inscrito_' + code, key); } catch (e) {}
         const up = {};
         up['salas/' + code + '/entries/' + key] = { players: players, live: live, status: 'pendente', ts: Date.now(), uid: (firebase.auth().currentUser ? firebase.auth().currentUser.uid : null) };
-        if (h) up['salas/' + code + '/ips/' + h] = key;
+        if (trava && h) up['salas/' + code + '/ips/' + h] = key;
         db.ref().update(up).catch(() => {
           liveViewerKey = null;
           try { localStorage.removeItem('inscrito_' + code); } catch (e) {}
@@ -2671,6 +2677,57 @@
 
     function liveToggleIp() {
       liveRoomRef().child('trancaIp').set(liveMeta.trancaIp === false);
+    }
+
+    /* ---------- CANTINHO DO CASTIGO (banimento até você perdoar) ---------- */
+    // no banco só ficam códigos embaralhados e os nomes (na live e no jogo). Nenhum IP aparece em tela.
+    const MSG_BAN = 'Você está no cantinho do castigo! 🚫 Não dá para se inscrever agora. Fale com o organizador.';
+
+    function liveBanir(key) {
+      const e = liveEntriesList(liveMeta).find(x => x.key === key);
+      if (!e) return;
+      const nick = (e.players || []).map(cleanName).join(' & ');
+      const live = cleanName(e.live || '');
+      if (!confirm('Banir ' + nick + (live ? ' (na live: ' + live + ')' : '') + '?\n\nEssa pessoa não vai conseguir mais se inscrever, em nenhuma sala, até você perdoar no Cantinho do Castigo.')) return;
+      const ips = liveMeta.ips || {};
+      const chaves = [];
+      Object.keys(ips).forEach(h => { if (ips[h] === key) chaves.push(h); });          // a internet dela (embaralhada)
+      (e.players || []).map(normTxt).filter(Boolean).forEach(n => chaves.push('n_' + n)); // e o apelido
+      const up = {};
+      chaves.forEach(k => { up['banidos/' + k] = true; });
+      up['castigo/c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { nick: nick, live: live, chaves: chaves, ts: Date.now() };
+      up['salas/' + liveRoomCode + '/entries/' + key] = null;
+      liveGetDb().ref().update(up).catch(err => alert(liveErroMsg(err)));
+    }
+
+    function castigoOpen() {
+      const db = liveGetDb();
+      if (!db || !rankUsuario()) { alert('Entre com o Google para ver o Cantinho do Castigo.'); return; }
+      db.ref('castigo').once('value').then(snap => {
+        const v = snap.val() || {};
+        const lista = Object.keys(v).map(k => ({ id: k, ...v[k] })).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        let html = '<div class="section-title" style="font-size:22px;">🚫 CANTINHO DO CASTIGO</div>';
+        if (!lista.length) html += '<div style="color:#aaa; margin:12px 0;">Ninguém no cantinho do castigo.</div>';
+        html += lista.map(x => `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; border:2px solid #c0392b; border-radius:10px; padding:8px 10px; margin:8px 0; background:#1a0b34;">
+            <span>${premioEsc(x.nick)}${x.live ? ' <span style="color:#00fbff; font-size:15px;">(na live: ' + premioEsc(x.live) + ')</span>' : ''}</span>
+            <button onclick="castigoPerdoar('${x.id}')" style="cursor:pointer; font-family:inherit; color:#fff; background:#27ae60; border:2px solid #000; border-radius:8px; padding:6px 12px;">✔ PERDOAR</button>
+          </div>`).join('');
+        html += '<div class="action-buttons" style="margin-top:14px;"><button class="btn-action btn-shuffle" onclick="rankClose()">FECHAR</button></div>';
+        rankModal(html);
+      }).catch(e => alert(liveErroMsg(e)));
+    }
+
+    function castigoPerdoar(id) {
+      const db = liveGetDb();
+      db.ref('castigo/' + id).once('value').then(snap => {
+        const v = snap.val();
+        if (!v) return;
+        if (!confirm('Perdoar ' + v.nick + '? Ele poderá se inscrever de novo.')) return;
+        const up = {};
+        (v.chaves || []).forEach(k => { up['banidos/' + k] = null; });
+        up['castigo/' + id] = null;
+        return db.ref().update(up).then(castigoOpen);
+      }).catch(e => alert(liveErroMsg(e)));
     }
 
     /* =================== FIM DO MODO AO VIVO =================== */
