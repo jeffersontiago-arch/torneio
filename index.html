@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_37 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_38 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -1792,11 +1792,15 @@
       }).catch(err => alert('Não consegui abrir as inscrições: ' + liveErroMsg(err)));
     }
 
+    let liveCodigo = '';
+
     function liveAttachHost(code) {
       const db = liveGetDb();
       if (!db) return;
-      if (liveRoomCode) db.ref('salas/' + liveRoomCode).off();
+      if (liveRoomCode) { db.ref('salas/' + liveRoomCode).off(); db.ref('codigos/' + liveRoomCode).off(); }
       liveRoomCode = code;
+      liveCodigo = '';
+      db.ref('codigos/' + code).on('value', sn => { liveCodigo = sn.val() || ''; liveRenderHost(); }, () => {});
       try { localStorage.setItem(lsk('liveHostRoom'), code); } catch (e) {}
       db.ref('salas/' + code).on('value', snap => {
         liveMeta = snap.val();
@@ -1846,6 +1850,8 @@
       const full = ok.length >= liveMeta.slots;
       const link = liveViewerLink();
       const aprov = liveMeta.aprovacao !== false;
+      const meuNick = (hostPerfilGet().nick || '').toLowerCase();
+      const semUid = ok.filter(e => !e.uid && !/^Bot\d+$/.test((e.players || [])[0] || '') && String((e.players || [])[0] || '').toLowerCase() !== meuNick).length;
       const btnStyle = 'cursor:pointer; font-family:inherit; font-size:14px; color:#fff; border:2px solid #000; border-radius:8px; padding:6px 12px;';
 
       box.innerHTML = `
@@ -1871,6 +1877,8 @@
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="codigoOpen()">CÓDIGO DA SALA 🔑</button>
             <button class="btn-action btn-shuffle" style="font-size:15px;" onclick="liveToggleOpen()">${liveMeta.open ? 'FECHAR INSCRIÇÕES (COMPLETA COM BOTS)' : 'REABRIR INSCRIÇÕES'}</button>
           </div>
+
+          <div style="font-size:15px; margin-top:10px;">🔑 Código da sala: <b>${premioEsc(liveCodigo) || '(ainda não definido)'}</b>${semUid ? ` <span style="color:#ff9f43;">— ⚠ ${semUid} aprovado(s) sem identificação do aparelho não conseguem ver o código</span>` : ''}</div>
 
           <div style="font-size:26px; color:#ffea00; margin:14px 0 8px;">
             INSCRITOS: ${ok.length} / ${liveMeta.slots} ${full ? '✅' : ''}
@@ -2055,6 +2063,7 @@
       if (ov) ov.remove();
       if (db) {
         db.ref('salas/' + code).off();
+        db.ref('codigos/' + code).off();
         db.ref('codigos/' + code).remove().catch(() => {});
         db.ref('salas/' + code).remove().catch(() => {});
       }
@@ -2148,7 +2157,7 @@
         const full = ok.length >= room.slots;
         const closed = !room.open || full;
         const mine = liveViewerKey ? all.find(e => e.key === liveViewerKey) : null;
-        liveViewerCodigo(code, db, room);
+        liveViewerCodigo(code, db, room, mine);
 
         if (liveViewerKey && !mine) {
           // se a inscrição existia e sumiu, foi recusada
@@ -2328,9 +2337,10 @@
     // host: reconecta na sala aberta antes de recarregar a página
     function liveDetach() {
       const db = liveGetDb();
-      if (db && liveRoomCode) db.ref('salas/' + liveRoomCode).off();
+      if (db && liveRoomCode) { db.ref('salas/' + liveRoomCode).off(); db.ref('codigos/' + liveRoomCode).off(); }
       liveRoomCode = null;
       liveMeta = null;
+      liveCodigo = '';
       premioQrId = '';
       premioQrLink = '';
       liveRenderHost();
@@ -2647,22 +2657,32 @@
 
     let liveViewerCodigoOn = false;
 
-    function liveViewerCodigo(code, db, room) {
+    function liveViewerCodigo(code, db, room, mine) {
       const uid = firebase.auth().currentUser ? firebase.auth().currentUser.uid : null;
       const liberado = !!(uid && room.aprovados && room.aprovados[uid] === true);
       const box = document.getElementById('viewer-codigo');
+      const aviso = t => '<div style="margin:14px 0; color:#ffea00;">' + t + '</div>';
       if (liberado && !liveViewerCodigoOn) {
         liveViewerCodigoOn = true;
         db.ref('codigos/' + code).on('value', s => {
           const v = s.val();
           box.innerHTML = v
             ? `<div class="solo-match-card" style="text-align:center; margin:14px 0;"><div class="section-title">🔑 CÓDIGO DA SALA</div><div style="font-size:42px; color:#38ef7d; letter-spacing:3px; word-break:break-all;">${premioEsc(v)}</div></div>`
-            : '<div style="margin:14px 0; color:#ffea00;">🔑 O código da sala ainda não foi liberado. Fique de olho!</div>';
-        }, () => { liveViewerCodigoOn = false; });
-      } else if (!liberado && liveViewerCodigoOn) {
-        db.ref('codigos/' + code).off();
-        liveViewerCodigoOn = false;
-        box.innerHTML = '';
+            : aviso('🔑 O código da sala ainda não foi liberado. Fique de olho!');
+        }, () => {
+          liveViewerCodigoOn = false;
+          box.innerHTML = aviso('⚠ Não consegui abrir o código da sala. Avise o organizador.');
+        });
+      } else if (!liberado) {
+        if (liveViewerCodigoOn) { db.ref('codigos/' + code).off(); liveViewerCodigoOn = false; }
+        let t = '';
+        if (mine && mine.status === 'aprovado') {
+          if (!uid) t = '⚠ Não consegui identificar o seu aparelho para liberar o código. Avise o organizador.';
+          else if (!mine.uid) t = '⚠ Sua inscrição foi feita sem identificação do aparelho, então o código não pode aparecer. Peça ao organizador para remover você e se inscreva de novo.';
+          else if (mine.uid !== uid) t = '⚠ Você abriu a página em outro navegador. Abra no mesmo aparelho e navegador em que se inscreveu.';
+          else t = '⏳ Liberando o seu código da sala...';
+        }
+        box.innerHTML = t ? aviso(t) : '';
       }
     }
 
