@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FINAL_38 - Brawl Stars Championship - Gerador Dinâmico</title>
+  <title>FINAL_39 - Brawl Stars Championship - Gerador Dinâmico</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@800;900&display=swap');
 
@@ -2117,14 +2117,41 @@
     }
 
     /* ---------- LADO DO INSCRITO (quem entra pelo link) ---------- */
+    let liveAuthErro = '';
+
+    async function liveLoginAnonimo() {
+      const auth = firebase.auth();
+      // espera o Firebase carregar o login salvo (no máximo 4 s)
+      await new Promise(res => {
+        let feito = false;
+        const fim = () => { if (!feito) { feito = true; res(); } };
+        try {
+          let un = null;
+          un = auth.onAuthStateChanged(() => { fim(); try { if (typeof un === 'function') un(); } catch (e) {} });
+        } catch (e) { fim(); }
+        setTimeout(fim, 4000);
+      });
+      if (auth.currentUser) return true;
+      const P = (firebase.auth.Auth || {}).Persistence || {};
+      for (const modo of [null, P.SESSION, P.NONE]) {
+        try {
+          if (modo) await auth.setPersistence(modo);
+          await auth.signInAnonymously();
+          if (auth.currentUser) return true;
+        } catch (e) {
+          liveAuthErro = (e && (e.code || e.message)) || 'desconhecido';
+          await new Promise(r => setTimeout(r, 400));
+        }
+      }
+      return false;
+    }
+
     function liveViewerInit(code) {
       document.querySelector('.container').style.display = 'none';
       document.getElementById('viewer-page').style.display = 'block';
       const db = liveGetDb();
       if (!db) { liveViewerInitCore(code); return; }
-      let login;
-      try { login = firebase.auth().signInAnonymously(); } catch (e) { login = Promise.reject(e); }
-      login.then(() => liveViewerInitCore(code)).catch(() => liveViewerInitCore(code));
+      liveLoginAnonimo().catch(() => {}).then(() => liveViewerInitCore(code));
     }
 
     function liveViewerInitCore(code) {
@@ -2132,7 +2159,9 @@
       page.style.display = 'block';
       document.querySelector('.container').style.display = 'none';
       const content = document.getElementById('viewer-content');
-      content.innerHTML = '<div id="viewer-top"></div><div id="viewer-codigo"></div><div id="viewer-list"></div>';
+      const emApp = /Instagram|FBAN|FBAV|TikTok|musical_ly|WhatsApp|Snapchat|Line\/|Messenger|GSA\//i.test(navigator.userAgent || '');
+      content.innerHTML = (emApp ? '<div style="margin-bottom:10px; color:#ffea00;">📲 Dica: se o código da sala não aparecer, abra este link no Chrome ou no Safari (menu ⋮ → "Abrir no navegador").</div>' : '')
+        + '<div id="viewer-top"></div><div id="viewer-codigo"></div><div id="viewer-list"></div>';
 
       const db = liveGetDb();
       if (!db) {
@@ -2255,6 +2284,7 @@
       const botao = document.getElementById('viewer-btn');
       if (botao) botao.disabled = true;
       (async () => {
+        if (!firebase.auth().currentUser) { try { await liveLoginAnonimo(); } catch (e) {} }
         const h = await liveIpHash();
         if (!h && trava) { msg.innerText = 'Não consegui verificar a sua internet. Desligue o bloqueador de anúncios e tente de novo.'; liveViewerCheck(); return; }
         // cantinho do castigo: a internet ou o apelido já banidos
@@ -2677,7 +2707,7 @@
         if (liveViewerCodigoOn) { db.ref('codigos/' + code).off(); liveViewerCodigoOn = false; }
         let t = '';
         if (mine && mine.status === 'aprovado') {
-          if (!uid) t = '⚠ Não consegui identificar o seu aparelho para liberar o código. Avise o organizador.';
+          if (!uid) t = '⚠ Não consegui identificar o seu aparelho para liberar o código. Avise o organizador.' + (liveAuthErro ? ' (erro: ' + premioEsc(liveAuthErro) + ')' : '');
           else if (!mine.uid) t = '⚠ Sua inscrição foi feita sem identificação do aparelho, então o código não pode aparecer. Peça ao organizador para remover você e se inscreva de novo.';
           else if (mine.uid !== uid) t = '⚠ Você abriu a página em outro navegador. Abra no mesmo aparelho e navegador em que se inscreveu.';
           else t = '⏳ Liberando o seu código da sala...';
